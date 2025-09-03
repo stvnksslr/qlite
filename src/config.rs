@@ -99,10 +99,10 @@ impl Default for Config {
 impl Config {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let contents = fs::read_to_string(path)
-            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+            .map_err(|e| ConfigError::Io(e.to_string()))?;
         
         let config: Config = toml::from_str(&contents)
-            .map_err(|e| ConfigError::ParseError(e.to_string()))?;
+            .map_err(|e| ConfigError::Parse(e.to_string()))?;
         
         config.validate()?;
         Ok(config)
@@ -123,11 +123,10 @@ impl Config {
     }
     
     fn apply_env_overrides(&mut self) {
-        if let Ok(port) = std::env::var("QLITE_PORT") {
-            if let Ok(port_num) = port.parse::<u16>() {
+        if let Ok(port) = std::env::var("QLITE_PORT")
+            && let Ok(port_num) = port.parse::<u16>() {
                 self.server.port = port_num;
             }
-        }
         
         if let Ok(host) = std::env::var("QLITE_HOST") {
             self.server.host = host;
@@ -152,31 +151,31 @@ impl Config {
     
     fn validate(&self) -> Result<(), ConfigError> {
         if self.server.port == 0 {
-            return Err(ConfigError::ValidationError("Server port cannot be 0".to_string()));
+            return Err(ConfigError::Validation("Server port cannot be 0".to_string()));
         }
         
         if self.server.host.is_empty() {
-            return Err(ConfigError::ValidationError("Server host cannot be empty".to_string()));
+            return Err(ConfigError::Validation("Server host cannot be empty".to_string()));
         }
         
         if self.database.path.is_empty() {
-            return Err(ConfigError::ValidationError("Database path cannot be empty".to_string()));
+            return Err(ConfigError::Validation("Database path cannot be empty".to_string()));
         }
         
         if self.queues.visibility_timeout_seconds == 0 {
-            return Err(ConfigError::ValidationError("Visibility timeout must be > 0".to_string()));
+            return Err(ConfigError::Validation("Visibility timeout must be > 0".to_string()));
         }
         
         if self.queues.message_retention_seconds < 60 {
-            return Err(ConfigError::ValidationError("Message retention must be >= 60 seconds".to_string()));
+            return Err(ConfigError::Validation("Message retention must be >= 60 seconds".to_string()));
         }
         
         if self.queues.message_retention_seconds > 1209600 { // 14 days
-            return Err(ConfigError::ValidationError("Message retention cannot exceed 14 days".to_string()));
+            return Err(ConfigError::Validation("Message retention cannot exceed 14 days".to_string()));
         }
         
         if self.queues.max_receive_count == 0 {
-            return Err(ConfigError::ValidationError("Max receive count must be > 0".to_string()));
+            return Err(ConfigError::Validation("Max receive count must be > 0".to_string()));
         }
         
         Ok(())
@@ -219,33 +218,65 @@ impl Default for QueueConfig {
 }
 
 impl QueueConfig {
+    #[allow(dead_code)]
     pub fn new(name: String, queue_type: QueueType) -> Self {
-        let mut config = Self::default();
-        config.name = name;
-        config.queue_type = queue_type;
+        let content_based_deduplication = queue_type == QueueType::Fifo;
         
-        if queue_type == QueueType::Fifo {
-            config.content_based_deduplication = true;
+        Self {
+            name,
+            queue_type,
+            content_based_deduplication,
+            ..Self::default()
         }
-        
-        config
     }
     
+    #[allow(dead_code)]
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.name.is_empty() {
+            return Err(ConfigError::Validation("Queue name cannot be empty".to_string()));
+        }
+        
+        if self.queue_type == QueueType::Fifo {
+            if !self.name.ends_with(".fifo") {
+                return Err(ConfigError::Validation("FIFO queue names must end with .fifo".to_string()));
+            }
+        } else if self.name.ends_with(".fifo") {
+            return Err(ConfigError::Validation("Standard queue names cannot end with .fifo".to_string()));
+        }
+        
+        if self.visibility_timeout_seconds == 0 {
+            return Err(ConfigError::Validation("Visibility timeout must be > 0".to_string()));
+        }
+        
+        if self.message_retention_seconds < 60 {
+            return Err(ConfigError::Validation("Message retention must be >= 60 seconds".to_string()));
+        }
+        
+        if self.message_retention_seconds > 1209600 { // 14 days
+            return Err(ConfigError::Validation("Message retention cannot exceed 14 days".to_string()));
+        }
+        
+        if self.max_receive_count == 0 {
+            return Err(ConfigError::Validation("Max receive count must be > 0".to_string()));
+        }
+        
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
 pub enum ConfigError {
-    IoError(String),
-    ParseError(String),
-    ValidationError(String),
+    Io(String),
+    Parse(String),
+    Validation(String),
 }
 
 impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConfigError::IoError(msg) => write!(f, "IO error: {}", msg),
-            ConfigError::ParseError(msg) => write!(f, "Parse error: {}", msg),
-            ConfigError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
+            ConfigError::Io(msg) => write!(f, "IO error: {}", msg),
+            ConfigError::Parse(msg) => write!(f, "Parse error: {}", msg),
+            ConfigError::Validation(msg) => write!(f, "Validation error: {}", msg),
         }
     }
 }

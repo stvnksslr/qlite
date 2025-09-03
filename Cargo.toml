@@ -3,11 +3,17 @@ name = "qlite"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "qlite"
+path = "src/lib.rs"
+
+[[bin]]
+name = "qlite"
+path = "src/main.rs"
+
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
 tokio-rusqlite = "0.5"
-deadpool-sqlite = "0.8"
-rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 uuid = { version = "1.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -24,3 +30,9 @@ askama = "0.12"
 toml = "0.8"
 tokio-cron-scheduler = "0.13"
 tracing = "0.1"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.8"
+httpmock = "0.7"
+serde_json = "1.0"

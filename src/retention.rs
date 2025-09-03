@@ -82,6 +82,12 @@ pub struct BackgroundServices {
     retention_service: Option<RetentionCleanupService>,
 }
 
+impl Default for BackgroundServices {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BackgroundServices {
     pub fn new() -> Self {
         Self {

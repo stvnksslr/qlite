@@ -345,6 +345,7 @@ impl Database {
             .await
     }
 
+    #[allow(dead_code)]
     pub async fn get_queue_messages(&self, queue_name: &str) -> Result<Vec<(String, String, String, Option<String>, u32, Option<String>, Option<String>)>> {
         let queue_name = queue_name.to_string();
         
@@ -446,21 +447,25 @@ impl Database {
     }
 
     // Placeholder methods for advanced features (to be implemented)
+    #[allow(dead_code)]
     pub async fn create_queue_with_config(&self, config: &crate::config::QueueConfig) -> Result<()> {
         // For now, just create a basic queue
         self.create_queue(&config.name).await
     }
 
+    #[allow(dead_code)]
     pub async fn get_queue_config(&self, _queue_name: &str) -> Result<Option<crate::config::QueueConfig>> {
         // Placeholder - return None for now
         Ok(None)
     }
 
+    #[allow(dead_code)]
     pub async fn move_message_to_dlq(&self, _message_id: &str, _failure_reason: &str) -> Result<bool> {
         // Placeholder - return false for now
         Ok(false)
     }
 
+    #[allow(dead_code)]
     pub async fn record_queue_metric(&self, _queue_name: &str, _metric: &QueueMetric) -> Result<()> {
         // Placeholder - do nothing for now
         Ok(())
@@ -512,6 +517,7 @@ pub struct QueueAttributes {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct QueueMetric {
     pub messages_sent: u32,
     pub messages_received: u32,

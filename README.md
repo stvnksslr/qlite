@@ -11,9 +11,6 @@ to use it for them.
 - **SQLite Backend**: Persistent message storage with no external dependencies
 - **Web UI**: Optional dashboard for queue monitoring and message browsing
 - **CLI Interface**: Command-line tools for queue management
-- **Message Attributes**: Support for custom message metadata
-- **Deduplication**: Optional message deduplication by ID
-- **Visibility Timeout**: Standard SQS message visibility handling
 
 ## Quick Start
 

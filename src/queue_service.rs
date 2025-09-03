@@ -18,6 +18,7 @@ impl QueueService {
         self.db.create_queue(queue_name).await
     }
 
+    #[allow(dead_code)]
     pub async fn create_queue_with_config(&self, config: &QueueConfig) -> Result<()> {
         self.db.create_queue_with_config(config).await
     }
@@ -88,6 +89,7 @@ impl QueueService {
         self.db.get_queue_attributes(queue_name).await
     }
 
+    #[allow(dead_code)]
     pub async fn get_queue_messages(&self, queue_name: &str) -> Result<Vec<(String, String, String, Option<String>, u32, Option<String>, Option<String>)>> {
         self.db.get_queue_messages(queue_name).await
     }
@@ -97,6 +99,7 @@ impl QueueService {
     }
 
     // DLQ-aware message processing
+    #[allow(dead_code)]
     pub async fn receive_message_with_dlq(&self, queue_name: &str) -> Result<Option<ReceivedMessage>> {
         // Use a loop instead of recursion to handle DLQ processing
         loop {
@@ -111,8 +114,8 @@ impl QueueService {
                 // Check if message should be moved to DLQ due to max receive count
                 if let Some(queue_config) = self.db.get_queue_config(queue_name).await? {
                     // Get the current receive count from database by querying the messages again
-                    if let Some((_, _, _, _, receive_count, _, _)) = self.get_message_details(&id).await? {
-                        if receive_count >= queue_config.max_receive_count {
+                    if let Some((_, _, _, _, receive_count, _, _)) = self.get_message_details(&id).await?
+                        && receive_count >= queue_config.max_receive_count {
                             // Move to DLQ
                             let reason = format!("Message exceeded max receive count of {}", queue_config.max_receive_count);
                             if self.db.move_message_to_dlq(&id, &reason).await? {
@@ -120,7 +123,6 @@ impl QueueService {
                                 continue;
                             }
                         }
-                    }
                 }
                 
                 // Message is valid, return it
@@ -133,6 +135,7 @@ impl QueueService {
     }
 
     // Helper method to get message details
+    #[allow(dead_code)]
     async fn get_message_details(&self, _message_id: &str) -> Result<Option<(String, String, String, Option<String>, u32, Option<String>, Option<String>)>> {
         // This would need to be implemented in the database layer
         // For now, return None to avoid compilation errors
@@ -140,10 +143,12 @@ impl QueueService {
     }
 
     // DLQ Management operations
+    #[allow(dead_code)]
     pub async fn move_message_to_dlq(&self, message_id: &str, failure_reason: &str) -> Result<bool> {
         self.db.move_message_to_dlq(message_id, failure_reason).await
     }
 
+    #[allow(dead_code)]
     pub async fn get_dlq_messages(&self, _dlq_name: &str) -> Result<Vec<(String, String, String, String, Option<String>)>> {
         // Get messages from dead_letter_messages table for the specified DLQ
         // This would need implementation in database layer
@@ -151,6 +156,7 @@ impl QueueService {
         Ok(Vec::new())
     }
 
+    #[allow(dead_code)]
     pub async fn redrive_dlq_messages(&self, _dlq_name: &str, _source_queue: &str, _max_messages: Option<u32>) -> Result<u32> {
         // Move messages from DLQ back to source queue
         // This would need implementation in database layer
@@ -158,6 +164,7 @@ impl QueueService {
         Ok(0)
     }
 
+    #[allow(dead_code)]
     pub async fn purge_dlq(&self, _dlq_name: &str) -> Result<u32> {
         // Delete all messages from DLQ
         // This would need implementation in database layer
@@ -166,6 +173,7 @@ impl QueueService {
     }
 
     // Metrics operations
+    #[allow(dead_code)]
     pub async fn record_metric(&self, queue_name: &str, metric: &QueueMetric) -> Result<()> {
         self.db.record_queue_metric(queue_name, metric).await
     }
@@ -176,10 +184,12 @@ impl QueueService {
     }
 
     // Enhanced queue configuration
+    #[allow(dead_code)]
     pub async fn get_queue_config(&self, queue_name: &str) -> Result<Option<QueueConfig>> {
         self.db.get_queue_config(queue_name).await
     }
 
+    #[allow(dead_code)]
     pub async fn set_queue_attributes(&self, _queue_name: &str, _attributes: HashMap<String, String>) -> Result<()> {
         // Parse attributes and update queue configuration
         // This would update queue settings like VisibilityTimeout, MessageRetentionPeriod, etc.

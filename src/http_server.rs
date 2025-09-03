@@ -461,10 +461,7 @@ struct SystemHealth {
 }
 
 async fn get_system_health(queue_service: &QueueService) -> SystemHealth {
-    let database_ok = match queue_service.list_queues().await {
-        Ok(_) => true,
-        Err(_) => false,
-    };
+    let database_ok = (queue_service.list_queues().await).is_ok();
     
     let queue_count = match queue_service.list_queues().await {
         Ok(queues) => queues.len(),
