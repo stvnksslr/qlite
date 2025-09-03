@@ -12,6 +12,9 @@ to use it for them.
 - **Web UI**: Optional dashboard for queue monitoring and message browsing
 - **CLI Interface**: Command-line tools for queue management
 
+### Web UI
+![QLite Dashboard](https://github.com/stvnksslr/qlite/blob/main/docs/screenshots/dashboard.png)
+
 ## Quick Start
 
 ### Installation
