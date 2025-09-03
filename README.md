@@ -13,7 +13,7 @@ to use it for them.
 - **CLI Interface**: Command-line tools for queue management
 
 ### Web UI
-![QLite Dashboard](https://github.com/stvnksslr/qlite/blob/main/docs/screenshots/dashboard.png)
+![QLite Dashboard](docs/screenshots/dashboard.png)
 
 ## Quick Start
 
