@@ -1,6 +1,9 @@
 # QLite
 
 A lightweight, SQS-compatible message queue backed by SQLite, written in Rust.
+The Primary purpose of this tool is to easily facilitate local or cicd based
+testing this project is not meant for production workloads and it is not reccomended
+to use it for them.
 
 ## Features
 
@@ -71,11 +74,3 @@ aws sqs create-queue --endpoint-url http://localhost:3000 --queue-name test-queu
 # Send message
 aws sqs send-message --endpoint-url http://localhost:3000 --queue-url http://localhost:3000/test-queue --message-body "Hello from AWS CLI"
 ```
-
-## Architecture
-
-- **Database**: SQLite with async operations via tokio-rusqlite
-- **Web Server**: Axum HTTP framework
-- **Templates**: Askama for HTML templating
-- **Message Format**: XML responses matching SQS format
-

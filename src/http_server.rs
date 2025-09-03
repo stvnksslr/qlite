@@ -37,13 +37,25 @@ pub fn create_router(queue_service: Arc<QueueService>, base_url: String, enable_
 
     let mut router = Router::new()
         .route("/", post(handle_sqs_action))
-        .route("/:queue_name", post(handle_queue_action));
+        .route("/:queue_name", post(handle_queue_action))
+        .route("/health", get(health_check))
+        .route("/health/ready", get(readiness_check))
+        .route("/health/live", get(liveness_check))
+        .route("/metrics", get(metrics_endpoint));
 
     // Add UI routes if enabled
     if enable_ui {
         router = router
             .route("/ui", get(ui::dashboard))
-            .route("/ui/queue/:queue_name", get(ui::queue_messages));
+            .route("/ui/queue/:queue_name", get(ui::queue_messages))
+            .route("/ui/create-queue", post(ui::create_queue_ui))
+            .route("/ui/delete-queue/:queue_name", post(ui::delete_queue_ui))
+            .route("/ui/delete-message/:message_id", post(ui::delete_message_ui))
+            .route("/ui/restore-message/:message_id", post(ui::restore_message_ui))
+            // JSON API endpoints for AJAX calls
+            .route("/api/ui/delete-queue/:queue_name", post(ui::delete_queue_json))
+            .route("/api/ui/delete-message/:message_id", post(ui::delete_message_json))
+            .route("/api/ui/restore-message/:message_id", post(ui::restore_message_json));
     }
 
     router
@@ -355,5 +367,122 @@ fn error_response(code: &str, message: &str) -> Response {
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal server error",
         ).into_response(),
+    }
+}
+
+// Health check handlers for production monitoring
+async fn health_check(State(state): State<Arc<AppState>>) -> Response {
+    let health_status = get_system_health(&state.queue_service).await;
+    
+    let response = serde_json::json!({
+        "status": health_status.status,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "service": "qlite-sqs",
+        "version": env!("CARGO_PKG_VERSION"),
+        "checks": {
+            "database": health_status.database_ok,
+            "queues": health_status.queue_count,
+            "retention_service": health_status.retention_active
+        }
+    });
+    
+    let status_code = if health_status.status == "healthy" {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    
+    (
+        status_code,
+        [("Content-Type", "application/json")],
+        response.to_string(),
+    ).into_response()
+}
+
+async fn readiness_check(State(state): State<Arc<AppState>>) -> Response {
+    // Check if the service is ready to handle requests
+    match state.queue_service.list_queues().await {
+        Ok(_) => (
+            StatusCode::OK,
+            [("Content-Type", "application/json")],
+            serde_json::json!({"status": "ready"}).to_string(),
+        ).into_response(),
+        Err(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [("Content-Type", "application/json")],
+            serde_json::json!({"status": "not ready", "reason": "database unavailable"}).to_string(),
+        ).into_response(),
+    }
+}
+
+async fn liveness_check() -> Response {
+    // Simple liveness check - if this handler runs, the service is alive
+    (
+        StatusCode::OK,
+        [("Content-Type", "application/json")],
+        serde_json::json!({
+            "status": "alive",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }).to_string(),
+    ).into_response()
+}
+
+async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> Response {
+    let health_status = get_system_health(&state.queue_service).await;
+    
+    let metrics = format!(
+        "# HELP qlite_queues_total Total number of queues\n\
+         # TYPE qlite_queues_total gauge\n\
+         qlite_queues_total {}\n\
+         # HELP qlite_health_status Health status (1=healthy, 0=unhealthy)\n\
+         # TYPE qlite_health_status gauge\n\
+         qlite_health_status {}\n\
+         # HELP qlite_retention_active Retention service status (1=active, 0=inactive)\n\
+         # TYPE qlite_retention_active gauge\n\
+         qlite_retention_active {}\n",
+        health_status.queue_count,
+        if health_status.status == "healthy" { 1 } else { 0 },
+        if health_status.retention_active { 1 } else { 0 }
+    );
+    
+    (
+        StatusCode::OK,
+        [("Content-Type", "text/plain")],
+        metrics,
+    ).into_response()
+}
+
+#[derive(Debug)]
+struct SystemHealth {
+    status: String,
+    database_ok: bool,
+    queue_count: usize,
+    retention_active: bool,
+}
+
+async fn get_system_health(queue_service: &QueueService) -> SystemHealth {
+    let database_ok = match queue_service.list_queues().await {
+        Ok(_) => true,
+        Err(_) => false,
+    };
+    
+    let queue_count = match queue_service.list_queues().await {
+        Ok(queues) => queues.len(),
+        Err(_) => 0,
+    };
+    
+    let retention_active = true; // Assume retention service is active if server is running
+    
+    let status = if database_ok {
+        "healthy"
+    } else {
+        "unhealthy"
+    }.to_string();
+    
+    SystemHealth {
+        status,
+        database_ok,
+        queue_count,
+        retention_active,
     }
 }

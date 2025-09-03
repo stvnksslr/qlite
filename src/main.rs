@@ -1,13 +1,18 @@
+mod config;
 mod database;
 mod http_server;
 mod message;
 mod queue_service;
+mod retention;
 mod sqs_types;
 mod ui;
 
 use clap::{Parser, Subcommand};
+use config::Config;
 use queue_service::QueueService;
+use retention::BackgroundServices;
 use std::sync::Arc;
+use tracing::info;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -51,7 +56,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     
     let cli = Cli::parse();
-    let service = Arc::new(QueueService::new("qlite.db").await?);
+    
+    // Load configuration with environment overrides and defaults
+    let config = Config::load_with_overrides().unwrap_or_else(|e| {
+        println!("Warning: Failed to load config: {}. Using defaults.", e);
+        Config::default()
+    });
+    
+    let service = Arc::new(QueueService::new(&config.database.path).await?);
 
     match cli.command {
         Commands::CreateQueue { name } => {
@@ -83,8 +95,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Commands::Server { port, base_url, enable_ui } => {
+            // Override config with CLI arguments
+            let mut server_config = config.clone();
+            server_config.server.port = port;
+            server_config.server.base_url = Some(base_url.clone());
+            server_config.server.enable_ui = enable_ui;
+            
             println!("Starting QLite SQS-compatible server on port {}", port);
             println!("Base URL: {}", base_url);
+            
+            // Start background services
+            let mut background_services = BackgroundServices::new();
+            background_services.start_retention_cleanup(Arc::clone(&service), server_config.clone()).await?;
+            info!("Background retention cleanup service started");
+            
+            // Setup graceful shutdown
+            let shutdown_signal = async {
+                tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
+                info!("Received shutdown signal, initiating graceful shutdown");
+            };
             
             let app = http_server::create_router(service, base_url, enable_ui);
             let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
@@ -93,7 +122,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if enable_ui {
                 println!("Web UI available at http://localhost:{}/ui", port);
             }
-            axum::serve(listener, app).await?;
+            println!("Press Ctrl+C to shutdown gracefully");
+            
+            // Run server with graceful shutdown
+            let server = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal);
+            
+            match server.await {
+                Ok(_) => info!("Server shutdown completed successfully"),
+                Err(e) => println!("Server error: {}", e),
+            }
+            
+            // Cleanup background services
+            info!("Cleaning up background services...");
+            // Background services will be dropped and cleaned up automatically
         }
     }
 

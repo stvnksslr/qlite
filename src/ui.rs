@@ -1,7 +1,8 @@
 use askama::Template;
 use axum::{
-    extract::{Path, State},
-    response::Html,
+    extract::{Path, State, Form},
+    response::{Html, Redirect, Json},
+    http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -42,6 +43,15 @@ pub struct MessageInfo {
     pub receive_count: u32,
     pub attributes: String,
     pub deduplication_id: String,
+    pub status: String,
+    pub processed_at: String,
+    pub deleted_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApiResponse {
+    pub success: bool,
+    pub message: String,
 }
 
 pub async fn dashboard(State(state): State<Arc<AppState>>) -> Result<Html<String>, String> {
@@ -112,10 +122,10 @@ async fn get_queue_messages(
     state: &Arc<AppState>,
     queue_name: &str,
 ) -> Result<Vec<MessageInfo>, Box<dyn std::error::Error>> {
-    let messages_data = state.queue_service.get_queue_messages(queue_name).await?;
+    let messages_data = state.queue_service.get_all_queue_messages(queue_name).await?;
     
     let mut messages = Vec::new();
-    for (id, body, created_at, visibility_timeout, receive_count, attributes, deduplication_id) in messages_data {
+    for (id, body, created_at, visibility_timeout, receive_count, attributes, deduplication_id, status, processed_at, deleted_at) in messages_data {
         messages.push(MessageInfo {
             id,
             body,
@@ -124,9 +134,121 @@ async fn get_queue_messages(
             receive_count,
             attributes: attributes.unwrap_or_else(|| "None".to_string()),
             deduplication_id: deduplication_id.unwrap_or_else(|| "None".to_string()),
+            status,
+            processed_at: processed_at.unwrap_or_else(|| "Never".to_string()),
+            deleted_at: deleted_at.unwrap_or_else(|| "Never".to_string()),
         });
     }
     
     Ok(messages)
+}
+
+// Form structures for UI operations
+#[derive(Debug, Deserialize)]
+pub struct CreateQueueForm {
+    pub queue_name: String,
+}
+
+// UI handler functions for queue and message management
+pub async fn create_queue_ui(
+    State(state): State<Arc<AppState>>,
+    Form(form): Form<CreateQueueForm>,
+) -> Result<Redirect, String> {
+    if form.queue_name.trim().is_empty() {
+        return Err("Queue name cannot be empty".to_string());
+    }
+
+    match state.queue_service.create_queue(&form.queue_name).await {
+        Ok(_) => Ok(Redirect::to("/ui")),
+        Err(e) => Err(format!("Failed to create queue: {}", e)),
+    }
+}
+
+pub async fn delete_queue_ui(
+    State(state): State<Arc<AppState>>,
+    Path(queue_name): Path<String>,
+) -> Result<Redirect, String> {
+    match state.queue_service.delete_queue(&queue_name).await {
+        Ok(_) => Ok(Redirect::to("/ui")),
+        Err(e) => Err(format!("Failed to delete queue: {}", e)),
+    }
+}
+
+pub async fn delete_message_ui(
+    State(state): State<Arc<AppState>>,
+    Path(message_id): Path<String>,
+) -> Result<Redirect, String> {
+    match state.queue_service.delete_message(&message_id).await {
+        Ok(_) => Ok(Redirect::to("/ui")),
+        Err(e) => Err(format!("Failed to delete message: {}", e)),
+    }
+}
+
+pub async fn restore_message_ui(
+    State(state): State<Arc<AppState>>,
+    Path(message_id): Path<String>,
+) -> Result<Redirect, String> {
+    match state.queue_service.restore_message(&message_id).await {
+        Ok(_) => Ok(Redirect::to("/ui")),
+        Err(e) => Err(format!("Failed to restore message: {}", e)),
+    }
+}
+
+// JSON API endpoints for AJAX calls that preserve UI state
+pub async fn delete_queue_json(
+    State(state): State<Arc<AppState>>,
+    Path(queue_name): Path<String>,
+) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    match state.queue_service.delete_queue(&queue_name).await {
+        Ok(_) => Ok(Json(ApiResponse {
+            success: true,
+            message: format!("Queue '{}' deleted successfully", queue_name),
+        })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                success: false,
+                message: format!("Failed to delete queue: {}", e),
+            }),
+        )),
+    }
+}
+
+pub async fn delete_message_json(
+    State(state): State<Arc<AppState>>,
+    Path(message_id): Path<String>,
+) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    match state.queue_service.delete_message(&message_id).await {
+        Ok(_) => Ok(Json(ApiResponse {
+            success: true,
+            message: "Message deleted successfully".to_string(),
+        })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                success: false,
+                message: format!("Failed to delete message: {}", e),
+            }),
+        )),
+    }
+}
+
+pub async fn restore_message_json(
+    State(state): State<Arc<AppState>>,
+    Path(message_id): Path<String>,
+) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    match state.queue_service.restore_message(&message_id).await {
+        Ok(_) => Ok(Json(ApiResponse {
+            success: true,
+            message: "Message restored successfully".to_string(),
+        })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                success: false,
+                message: format!("Failed to restore message: {}", e),
+            }),
+        )),
+    }
 }
 
