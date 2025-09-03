@@ -2,7 +2,7 @@
 
 A lightweight, SQS-compatible message queue backed by SQLite, written in Rust.
 The Primary purpose of this tool is to easily facilitate local or cicd based
-testing this project is not meant for production workloads and it is not reccomended
+testing this project is not meant for production workloads and it is not recommended
 to use it for them.
 
 ## Features
