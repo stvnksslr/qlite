@@ -1,17 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-// SQS Request Types
-#[derive(Debug, Deserialize)]
-pub struct SendMessageRequest {
-    #[serde(rename = "MessageBody")]
-    pub message_body: String,
-    #[serde(rename = "MessageAttributes", default)]
-    pub message_attributes: HashMap<String, MessageAttribute>,
-    #[serde(rename = "MessageDeduplicationId")]
-    pub message_deduplication_id: Option<String>,
-}
-
+// SQS Message Attribute (used in responses)
 #[derive(Debug, Deserialize, Serialize)]
 pub struct MessageAttribute {
     #[serde(rename = "StringValue")]
@@ -20,24 +10,6 @@ pub struct MessageAttribute {
     pub binary_value: Option<String>,
     #[serde(rename = "DataType")]
     pub data_type: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ReceiveMessageRequest {
-    #[serde(rename = "MaxNumberOfMessages", default = "default_max_messages")]
-    pub max_number_of_messages: u32,
-    #[serde(rename = "WaitTimeSeconds", default)]
-    pub wait_time_seconds: u32,
-}
-
-fn default_max_messages() -> u32 {
-    1
-}
-
-#[derive(Debug, Deserialize)]
-pub struct DeleteMessageRequest {
-    #[serde(rename = "ReceiptHandle")]
-    pub receipt_handle: String,
 }
 
 // SQS Response Types

@@ -2,7 +2,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
     Router,
 };
 use quick_xml::se::to_string as to_xml;
@@ -15,6 +15,7 @@ use crate::{
     message::{MessageAttributeValue},
     queue_service::QueueService,
     sqs_types::*,
+    ui,
 };
 
 pub struct AppState {
@@ -28,15 +29,24 @@ struct ActionQuery {
     action: String,
 }
 
-pub fn create_router(queue_service: Arc<QueueService>, base_url: String) -> Router {
+pub fn create_router(queue_service: Arc<QueueService>, base_url: String, enable_ui: bool) -> Router {
     let state = Arc::new(AppState {
         queue_service,
         base_url,
     });
 
-    Router::new()
+    let mut router = Router::new()
         .route("/", post(handle_sqs_action))
-        .route("/:queue_name", post(handle_queue_action))
+        .route("/:queue_name", post(handle_queue_action));
+
+    // Add UI routes if enabled
+    if enable_ui {
+        router = router
+            .route("/ui", get(ui::dashboard))
+            .route("/ui/queue/:queue_name", get(ui::queue_messages));
+    }
+
+    router
         .with_state(state)
         .layer(
             ServiceBuilder::new()

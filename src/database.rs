@@ -197,7 +197,7 @@ impl Database {
         self.connection
             .call(|conn| {
                 let mut stmt = conn.prepare("SELECT name, created_at FROM queues ORDER BY name")?;
-                let mut rows = stmt.query_map([], |row| {
+                let rows = stmt.query_map([], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
@@ -205,10 +205,40 @@ impl Database {
                 })?;
 
                 let mut queues = Vec::new();
-                while let Some(row) = rows.next() {
+                for row in rows {
                     queues.push(row?);
                 }
                 Ok(queues)
+            })
+            .await
+    }
+
+    pub async fn get_queue_messages(&self, queue_name: &str) -> Result<Vec<(String, String, String, Option<String>, u32, Option<String>, Option<String>)>> {
+        let queue_name = queue_name.to_string();
+        
+        self.connection
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, body, created_at, visibility_timeout, receive_count, attributes, deduplication_id FROM messages WHERE queue_name = ?1 ORDER BY created_at ASC"
+                )?;
+                
+                let rows = stmt.query_map([&queue_name], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,        // id
+                        row.get::<_, String>(1)?,        // body
+                        row.get::<_, String>(2)?,        // created_at
+                        row.get::<_, Option<String>>(3)?, // visibility_timeout
+                        row.get::<_, u32>(4)?,           // receive_count
+                        row.get::<_, Option<String>>(5)?, // attributes
+                        row.get::<_, Option<String>>(6)?, // deduplication_id
+                    ))
+                })?;
+
+                let mut messages = Vec::new();
+                for row in rows {
+                    messages.push(row?);
+                }
+                Ok(messages)
             })
             .await
     }
@@ -221,7 +251,7 @@ impl Database {
                 // Get queue metadata
                 let mut stmt = conn.prepare("SELECT created_at FROM queues WHERE name = ?1")?;
                 let queue_exists: Option<String> = stmt.query_row([&queue_name], |row| {
-                    Ok(row.get(0)?)
+                    row.get(0)
                 }).optional()?;
                 
                 if queue_exists.is_none() {

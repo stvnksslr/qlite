@@ -74,4 +74,8 @@ impl QueueService {
     pub async fn get_queue_attributes(&self, queue_name: &str) -> Result<Option<QueueAttributes>> {
         self.db.get_queue_attributes(queue_name).await
     }
+
+    pub async fn get_queue_messages(&self, queue_name: &str) -> Result<Vec<(String, String, String, Option<String>, u32, Option<String>, Option<String>)>> {
+        self.db.get_queue_messages(queue_name).await
+    }
 }

@@ -3,6 +3,7 @@ mod http_server;
 mod message;
 mod queue_service;
 mod sqs_types;
+mod ui;
 
 use clap::{Parser, Subcommand};
 use queue_service::QueueService;
@@ -40,6 +41,8 @@ enum Commands {
         port: u16,
         #[arg(long, default_value = "http://localhost:3000")]
         base_url: String,
+        #[arg(long, default_value = "false")]
+        enable_ui: bool,
     },
 }
 
@@ -79,14 +82,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Message not found or already deleted");
             }
         }
-        Commands::Server { port, base_url } => {
+        Commands::Server { port, base_url, enable_ui } => {
             println!("Starting QLite SQS-compatible server on port {}", port);
             println!("Base URL: {}", base_url);
             
-            let app = http_server::create_router(service, base_url);
+            let app = http_server::create_router(service, base_url, enable_ui);
             let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
             
             println!("Server running at http://0.0.0.0:{}", port);
+            if enable_ui {
+                println!("Web UI available at http://localhost:{}/ui", port);
+            }
             axum::serve(listener, app).await?;
         }
     }

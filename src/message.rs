@@ -56,14 +56,7 @@ pub struct Queue {
     pub created_at: DateTime<Utc>,
 }
 
-impl Queue {
-    pub fn new(name: String) -> Self {
-        Self {
-            name,
-            created_at: Utc::now(),
-        }
-    }
-}
+impl Queue {}
 
 #[derive(Debug, Clone)]
 pub struct ReceivedMessage {
