@@ -622,16 +622,16 @@ impl Database {
                      delay_seconds, receive_message_wait_time_seconds) 
                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                     "#,
-                    [
-                        &config_name,
-                        &(is_fifo as i32).to_string(),
-                        &(content_based_dedup as i32).to_string(),
-                        &visibility_timeout.to_string(),
-                        &retention_period.to_string(),
-                        &max_receive_count.map(|v| v.to_string()).unwrap_or_else(|| "NULL".to_string()),
-                        &dlq_arn.unwrap_or_else(|| "NULL".to_string()),
-                        &delay_seconds.to_string(),
-                        &wait_time.to_string()
+                    rusqlite::params![
+                        config_name,
+                        is_fifo as i32,
+                        content_based_dedup as i32,
+                        visibility_timeout,
+                        retention_period,
+                        max_receive_count,
+                        dlq_arn,
+                        delay_seconds,
+                        wait_time
                     ],
                 )?;
                 Ok(())
@@ -1028,14 +1028,14 @@ impl Database {
                      receive_message_wait_time_seconds, max_receive_count, dead_letter_target_arn) 
                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                     "#,
-                    [
-                        &queue_name,
-                        &visibility_timeout.to_string(),
-                        &message_retention_period.to_string(), 
-                        &delay_seconds.to_string(),
-                        &receive_message_wait_time.to_string(),
-                        &max_receive_count.map(|v| v.to_string()).unwrap_or_else(|| "".to_string()),
-                        &dead_letter_target_arn.unwrap_or_else(|| "".to_string())
+                    rusqlite::params![
+                        queue_name,
+                        visibility_timeout,
+                        message_retention_period,
+                        delay_seconds,
+                        receive_message_wait_time,
+                        max_receive_count,
+                        dead_letter_target_arn
                     ],
                 )?;
                 Ok(())

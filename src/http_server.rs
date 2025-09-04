@@ -120,6 +120,51 @@ async fn handle_sqs_action(
         "DeleteMessageBatch" => {
             handle_delete_message_batch(state, &params).await
         },
+        "SetQueueAttributes" => {
+            if let Some(queue_url) = params.get("QueueUrl").cloned() {
+                // Extract queue name from URL (assuming format like http://localhost:3000/queue-name)
+                let queue_name = queue_url.split('/').last().unwrap_or("");
+                handle_set_queue_attributes(state, queue_name, params).await
+            } else {
+                error_response("MissingParameter", "QueueUrl parameter is required")
+            }
+        },
+        "GetQueueAttributes" => {
+            if let Some(queue_url) = params.get("QueueUrl").cloned() {
+                // Extract queue name from URL (assuming format like http://localhost:3000/queue-name)
+                let queue_name = queue_url.split('/').last().unwrap_or("");
+                handle_get_queue_attributes(state, queue_name).await
+            } else {
+                error_response("MissingParameter", "QueueUrl parameter is required")
+            }
+        },
+        "SendMessage" => {
+            if let Some(queue_url) = params.get("QueueUrl").cloned() {
+                // Extract queue name from URL (assuming format like http://localhost:3000/queue-name)
+                let queue_name = queue_url.split('/').last().unwrap_or("");
+                handle_send_message_enhanced(state, &queue_name, params).await
+            } else {
+                error_response("MissingParameter", "QueueUrl parameter is required")
+            }
+        },
+        "ReceiveMessage" => {
+            if let Some(queue_url) = params.get("QueueUrl").cloned() {
+                // Extract queue name from URL (assuming format like http://localhost:3000/queue-name)
+                let queue_name = queue_url.split('/').last().unwrap_or("");
+                handle_receive_message_enhanced(state, &queue_name, params).await
+            } else {
+                error_response("MissingParameter", "QueueUrl parameter is required")
+            }
+        },
+        "DeleteMessage" => {
+            if let Some(queue_url) = params.get("QueueUrl").cloned() {
+                // Extract queue name from URL (assuming format like http://localhost:3000/queue-name)
+                let queue_name = queue_url.split('/').last().unwrap_or("");
+                handle_delete_message(state, &queue_name, params).await
+            } else {
+                error_response("MissingParameter", "QueueUrl parameter is required")
+            }
+        },
         _ => error_response("InvalidAction", &format!("Unknown action: {}", action)),
     }
 }
@@ -387,7 +432,10 @@ async fn handle_send_message_enhanced(
             };
             xml_response(response)
         },
-        Err(_) => error_response("InternalError", "Failed to send message"),
+        Err(err) => {
+            eprintln!("SendMessage error: {:?}", err);
+            error_response("InternalError", "Failed to send message")
+        },
     }
 }
 
