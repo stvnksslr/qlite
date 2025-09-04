@@ -6,7 +6,6 @@ use axum::{
     Router,
 };
 use quick_xml::se::to_string as to_xml;
-use serde::Deserialize;
 use std::{collections::HashMap, sync::Arc};
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -165,6 +164,15 @@ async fn handle_sqs_action(
                 error_response("MissingParameter", "QueueUrl parameter is required")
             }
         },
+        "DeleteQueue" => {
+            if let Some(queue_url) = params.get("QueueUrl").cloned() {
+                // Extract queue name from URL (assuming format like http://localhost:3000/queue-name)
+                let queue_name = queue_url.split('/').last().unwrap_or("");
+                handle_delete_queue(state, queue_name).await
+            } else {
+                error_response("MissingParameter", "QueueUrl parameter is required")
+            }
+        },
         _ => error_response("InvalidAction", &format!("Unknown action: {}", action)),
     }
 }
@@ -246,7 +254,7 @@ async fn handle_create_queue(state: Arc<AppState>, queue_name: &str) -> Response
     }
 }
 
-async fn handle_create_queue_with_attributes(state: Arc<AppState>, queue_name: &str, params: &HashMap<String, String>) -> Response {
+async fn handle_create_queue_with_attributes(state: Arc<AppState>, queue_name: &str, _params: &HashMap<String, String>) -> Response {
     // For now, just create the queue normally - attributes support can be added later
     handle_create_queue(state, queue_name).await
 }
@@ -270,83 +278,24 @@ async fn handle_get_queue_url(state: Arc<AppState>, queue_name: &str) -> Respons
     }
 }
 
-async fn handle_send_message(
-    state: Arc<AppState>,
-    queue_name: &str,
-    params: HashMap<String, String>,
-) -> Response {
-    let message_body = match params.get("MessageBody") {
-        Some(body) => body,
-        None => return error_response("MissingParameter", "MessageBody parameter is required"),
-    };
-
-    let message_attributes = parse_message_attributes(&params);
-    let deduplication_id = params.get("MessageDeduplicationId").cloned();
-
-    match state.queue_service.send_message(
-        queue_name,
-        message_body,
-        message_attributes,
-        deduplication_id,
-    ).await {
-        Ok(message_id) => {
-            let response = SendMessageResponse {
-                send_message_result: SendMessageResult {
-                    message_id,
-                    md5_of_body: format!("{:x}", md5::compute(message_body)),
-                },
+async fn handle_delete_queue(state: Arc<AppState>, queue_name: &str) -> Response {
+    match state.queue_service.delete_queue(queue_name).await {
+        Ok(true) => {
+            let response = DeleteQueueResponse {
+                delete_queue_result: DeleteQueueResult {},
             };
             xml_response(response)
         },
-        Err(_) => error_response("InternalError", "Failed to send message"),
+        Ok(false) => {
+            error_response("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist")
+        },
+        Err(_) => {
+            error_response("InternalError", "Failed to delete queue")
+        }
     }
 }
 
-async fn handle_receive_message(
-    state: Arc<AppState>,
-    queue_name: &str,
-    _params: HashMap<String, String>,
-) -> Response {
-    match state.queue_service.receive_message(queue_name).await {
-        Ok(Some(received_msg)) => {
-            let mut message_attributes = HashMap::new();
-            if let Some(attrs) = received_msg.attributes {
-                for (key, value) in attrs {
-                    message_attributes.insert(key, MessageAttribute {
-                        string_value: value.string_value,
-                        binary_value: value.binary_value,
-                        data_type: value.data_type,
-                    });
-                }
-            }
 
-            let sqs_message = SqsMessage {
-                message_id: received_msg.id,
-                receipt_handle: received_msg.receipt_handle,
-                body: received_msg.body,
-                attributes: HashMap::new(),
-                message_attributes,
-            };
-
-            let response = ReceiveMessageResponse {
-                receive_message_result: ReceiveMessageResult {
-                    messages: vec![sqs_message],
-                },
-            };
-
-            xml_response(response)
-        },
-        Ok(None) => {
-            let response = ReceiveMessageResponse {
-                receive_message_result: ReceiveMessageResult {
-                    messages: vec![],
-                },
-            };
-            xml_response(response)
-        },
-        Err(_) => error_response("InternalError", "Failed to receive message"),
-    }
-}
 
 async fn handle_delete_message(
     state: Arc<AppState>,
@@ -470,7 +419,7 @@ async fn handle_receive_message_enhanced(
                     message_id: received_msg.id,
                     receipt_handle: received_msg.receipt_handle,
                     body: received_msg.body,
-                    attributes: HashMap::new(),
+                    attributes: create_basic_system_attributes(),
                     message_attributes,
                 }
             }).collect();
@@ -520,35 +469,48 @@ async fn handle_set_queue_attributes(
 // Batch operation handlers
 
 async fn handle_send_message_batch(state: Arc<AppState>, params: &HashMap<String, String>) -> Response {
-    // Parse batch entries from parameters
-    let mut entries = Vec::new();
-    let mut i = 1;
-    
-    loop {
-        let id_key = format!("SendMessageBatchRequestEntry.{}.Id", i);
-        let body_key = format!("SendMessageBatchRequestEntry.{}.MessageBody", i);
-        
-        if let (Some(id), Some(body)) = (params.get(&id_key), params.get(&body_key)) {
-            entries.push((id.clone(), body.clone()));
-            i += 1;
-        } else {
-            break;
+    // Extract queue URL and derive queue name
+    let queue_url = match params.get("QueueUrl") {
+        Some(url) => url,
+        None => {
+            let error_response = BatchResultErrorEntry {
+                id: "1".to_string(),
+                code: "MissingParameter".to_string(),
+                message: "QueueUrl parameter is required".to_string(),
+                sender_fault: true,
+            };
+            
+            let response = SendMessageBatchResponse {
+                send_message_batch_result: SendMessageBatchResult {
+                    successful: vec![],
+                    failed: vec![error_response],
+                },
+            };
+            return xml_response(response);
         }
-    }
-
-    if entries.is_empty() {
-        return error_response("MissingParameter", "At least one batch entry is required");
-    }
-
-    // TODO: Extract queue name from URL or add it as a parameter
-    // For now, return a placeholder response
-    let response = SendMessageBatchResponse {
-        send_message_batch_result: SendMessageBatchResult {
-            successful: vec![],
-            failed: vec![],
-        },
     };
-    xml_response(response)
+
+    // Extract queue name from URL (format: http://localhost:3000/queue-name)
+    let queue_name = queue_url.split('/').last().unwrap_or("");
+    if queue_name.is_empty() {
+        let error_response = BatchResultErrorEntry {
+            id: "1".to_string(),
+            code: "InvalidParameterValue".to_string(),
+            message: "Invalid QueueUrl format".to_string(),
+            sender_fault: true,
+        };
+        
+        let response = SendMessageBatchResponse {
+            send_message_batch_result: SendMessageBatchResult {
+                successful: vec![],
+                failed: vec![error_response],
+            },
+        };
+        return xml_response(response);
+    }
+
+    // Delegate to the queue-specific handler
+    handle_send_message_batch_for_queue(state, queue_name, params.clone()).await
 }
 
 async fn handle_send_message_batch_for_queue(
@@ -689,14 +651,48 @@ async fn handle_send_message_batch_for_queue(
 }
 
 async fn handle_delete_message_batch(state: Arc<AppState>, params: &HashMap<String, String>) -> Response {
-    // Placeholder implementation
-    let response = DeleteMessageBatchResponse {
-        delete_message_batch_result: DeleteMessageBatchResult {
-            successful: vec![],
-            failed: vec![],
-        },
+    // Extract queue URL and derive queue name
+    let queue_url = match params.get("QueueUrl") {
+        Some(url) => url,
+        None => {
+            let error_response = BatchResultErrorEntry {
+                id: "1".to_string(),
+                code: "MissingParameter".to_string(),
+                message: "QueueUrl parameter is required".to_string(),
+                sender_fault: true,
+            };
+            
+            let response = DeleteMessageBatchResponse {
+                delete_message_batch_result: DeleteMessageBatchResult {
+                    successful: vec![],
+                    failed: vec![error_response],
+                },
+            };
+            return xml_response(response);
+        }
     };
-    xml_response(response)
+
+    // Extract queue name from URL
+    let queue_name = queue_url.split('/').last().unwrap_or("");
+    if queue_name.is_empty() {
+        let error_response = BatchResultErrorEntry {
+            id: "1".to_string(),
+            code: "InvalidParameterValue".to_string(),
+            message: "Invalid QueueUrl format".to_string(),
+            sender_fault: true,
+        };
+        
+        let response = DeleteMessageBatchResponse {
+            delete_message_batch_result: DeleteMessageBatchResult {
+                successful: vec![],
+                failed: vec![error_response],
+            },
+        };
+        return xml_response(response);
+    }
+
+    // Delegate to the queue-specific handler
+    handle_delete_message_batch_for_queue(state, queue_name, params.clone()).await
 }
 
 async fn handle_delete_message_batch_for_queue(
@@ -816,7 +812,7 @@ async fn handle_receive_message_batch(
         .unwrap_or(1)
         .min(10);  // AWS SQS limit
     
-    let wait_time_seconds = params
+    let _wait_time_seconds = params
         .get("WaitTimeSeconds") 
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(0);
@@ -830,7 +826,7 @@ async fn handle_receive_message_batch(
                     message_id: msg.id.clone(),
                     receipt_handle: msg.id, // For now, receipt handle is the same as message ID
                     body: msg.body,
-                    attributes: HashMap::new(), // TODO: Add queue attributes if needed
+                    attributes: create_basic_system_attributes(),
                     message_attributes: msg.attributes.unwrap_or_default()
                         .into_iter()
                         .map(|(k, v)| (k, MessageAttribute {
@@ -879,19 +875,64 @@ fn parse_json_params(body: &str) -> Result<HashMap<String, String>, ()> {
             let mut params = HashMap::new();
             if let serde_json::Value::Object(obj) = json {
                 for (key, value) in obj {
-                    let value_str = match value {
-                        serde_json::Value::String(s) => s,
-                        serde_json::Value::Number(n) => n.to_string(),
-                        serde_json::Value::Bool(b) => b.to_string(),
-                        _ => value.to_string(),
-                    };
-                    params.insert(key, value_str);
+                    match key.as_str() {
+                        // Handle batch entries specially
+                        "Entries" => {
+                            if let serde_json::Value::Array(entries) = value {
+                                for (i, entry) in entries.iter().enumerate() {
+                                    let entry_num = i + 1;
+                                    if let serde_json::Value::Object(entry_obj) = entry {
+                                        for (entry_key, entry_value) in entry_obj {
+                                            // Determine prefix based on action type - we'll check headers context
+                                            let param_key = format!("SendMessageBatchRequestEntry.{}.{}", entry_num, entry_key);
+                                            let value_str = match entry_value {
+                                                serde_json::Value::String(s) => s.clone(),
+                                                serde_json::Value::Number(n) => n.to_string(),
+                                                serde_json::Value::Bool(b) => b.to_string(),
+                                                _ => entry_value.to_string().trim_matches('"').to_string(),
+                                            };
+                                            params.insert(param_key, value_str.clone());
+                                            
+                                            // Also add DeleteMessageBatchRequestEntry version for delete operations
+                                            let delete_param_key = format!("DeleteMessageBatchRequestEntry.{}.{}", entry_num, entry_key);
+                                            params.insert(delete_param_key, value_str);
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        _ => {
+                            let value_str = match value {
+                                serde_json::Value::String(s) => s,
+                                serde_json::Value::Number(n) => n.to_string(),
+                                serde_json::Value::Bool(b) => b.to_string(),
+                                _ => value.to_string().trim_matches('"').to_string(),
+                            };
+                            params.insert(key, value_str);
+                        }
+                    }
                 }
             }
             Ok(params)
         },
         Err(_) => Err(()),
     }
+}
+
+fn create_basic_system_attributes() -> HashMap<String, String> {
+    let mut system_attrs = HashMap::new();
+    
+    // SentTimestamp - when message was sent (use current time as approximation)
+    let sent_timestamp = chrono::Utc::now().timestamp_millis().to_string();
+    system_attrs.insert("SentTimestamp".to_string(), sent_timestamp);
+    
+    // ApproximateReceiveCount - start with 1 (would be updated from database in real implementation)
+    system_attrs.insert("ApproximateReceiveCount".to_string(), "1".to_string());
+    
+    // SenderId - dummy value for compatibility  
+    system_attrs.insert("SenderId".to_string(), "AIDAIENQZJOLO23YVJ4VO".to_string());
+    
+    system_attrs
 }
 
 fn parse_message_attributes(params: &HashMap<String, String>) -> Option<HashMap<String, MessageAttributeValue>> {
@@ -1025,76 +1066,11 @@ fn get_aws_sqs_error_details(code: &str) -> (StatusCode, String) {
 }
 
 // Request validation functions
-fn validate_queue_name(queue_name: &str) -> Result<(), (&'static str, &'static str)> {
-    if queue_name.is_empty() {
-        return Err(("MissingParameter", "QueueName parameter is required"));
-    }
-    
-    if queue_name.len() > 80 {
-        return Err(("InvalidParameterValue", "Queue name must be 80 characters or less"));
-    }
-    
-    // AWS SQS queue name validation rules
-    if !queue_name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
-        return Err(("InvalidParameterValue", "Queue name can only contain alphanumeric characters, hyphens, and underscores"));
-    }
-    
-    if queue_name.starts_with('-') || queue_name.ends_with('-') {
-        return Err(("InvalidParameterValue", "Queue name cannot start or end with a hyphen"));
-    }
-    
-    Ok(())
-}
 
-fn validate_message_body(body: &str) -> Result<(), (&'static str, &'static str)> {
-    if body.is_empty() {
-        return Err(("MissingParameter", "MessageBody parameter is required"));
-    }
-    
-    if body.len() > 262144 { // 256 KB limit
-        return Err(("MessageTooLong", "Message body exceeds maximum size of 256KB"));
-    }
-    
-    Ok(())
-}
 
-fn validate_receipt_handle(handle: &str) -> Result<(), (&'static str, &'static str)> {
-    if handle.is_empty() {
-        return Err(("MissingParameter", "ReceiptHandle parameter is required"));
-    }
-    
-    Ok(())
-}
 
-fn validate_wait_time_seconds(wait_time: u32) -> Result<(), (&'static str, &'static str)> {
-    if wait_time > 20 {
-        return Err(("InvalidParameterValue", "WaitTimeSeconds must be between 0 and 20"));
-    }
-    
-    Ok(())
-}
 
-fn validate_max_messages(max_messages: u32) -> Result<(), (&'static str, &'static str)> {
-    if max_messages == 0 || max_messages > 10 {
-        return Err(("InvalidParameterValue", "MaxNumberOfMessages must be between 1 and 10"));
-    }
-    
-    Ok(())
-}
 
-// Enhanced error response wrapper for validation results
-fn validate_and_execute<F, T>(
-    validation_result: Result<(), (&'static str, &'static str)>,
-    action: F,
-) -> Result<T, Response>
-where
-    F: FnOnce() -> T,
-{
-    match validation_result {
-        Ok(()) => Ok(action()),
-        Err((code, message)) => Err(error_response(code, message)),
-    }
-}
 
 // Health check handlers for production monitoring
 async fn health_check(State(state): State<Arc<AppState>>) -> Response {

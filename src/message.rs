@@ -67,17 +67,7 @@ impl Message {
         self
     }
 
-    pub fn with_sequence_number(mut self, sequence_number: i64) -> Self {
-        self.sequence_number = Some(sequence_number);
-        self
-    }
 
-    pub fn is_ready_for_delivery(&self) -> bool {
-        match self.delay_until {
-            Some(delay_until) => Utc::now() >= delay_until,
-            None => true,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,44 +83,7 @@ pub struct Queue {
 }
 
 impl Queue {
-    pub fn new(name: String) -> Self {
-        let is_fifo = name.ends_with(".fifo");
-        Self {
-            name,
-            created_at: Utc::now(),
-            is_fifo,
-            content_based_deduplication: false,
-            visibility_timeout_seconds: 30,
-            message_retention_period_seconds: 345600, // 4 days
-            max_receive_count: None,
-            dead_letter_target_arn: None,
-        }
-    }
 
-    pub fn with_attributes(mut self, attributes: &HashMap<String, String>) -> Self {
-        if let Some(value) = attributes.get("ContentBasedDeduplication") {
-            self.content_based_deduplication = value == "true";
-        }
-        if let Some(value) = attributes.get("VisibilityTimeout") {
-            if let Ok(timeout) = value.parse::<u32>() {
-                self.visibility_timeout_seconds = timeout;
-            }
-        }
-        if let Some(value) = attributes.get("MessageRetentionPeriod") {
-            if let Ok(period) = value.parse::<u32>() {
-                self.message_retention_period_seconds = period;
-            }
-        }
-        if let Some(value) = attributes.get("MaxReceiveCount") {
-            if let Ok(count) = value.parse::<u32>() {
-                self.max_receive_count = Some(count);
-            }
-        }
-        if let Some(value) = attributes.get("DeadLetterTargetArn") {
-            self.dead_letter_target_arn = Some(value.clone());
-        }
-        self
-    }
 }
 
 #[derive(Debug, Clone)]

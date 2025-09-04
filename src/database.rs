@@ -406,10 +406,10 @@ impl Database {
                     if let Some((Some(max_receive_count), Some(_dlq_arn))) = queue_config {
                         if new_receive_count > max_receive_count {
                             // Move to DLQ instead of returning the message
-                            let reason = format!("Message exceeded max receive count of {}", max_receive_count);
+                            let _reason = format!("Message exceeded max receive count of {}", max_receive_count);
                             
                             // Get message details for DLQ move
-                            let message_details = conn.prepare(
+                            let _message_details = conn.prepare(
                                 "SELECT queue_name, body, created_at, attributes FROM messages WHERE id = ?1"
                             )?.query_row([&id], |row| {
                                 Ok((
@@ -876,18 +876,6 @@ impl Database {
     }
 
     // Enhanced send_message with DelaySeconds and FIFO support
-    pub async fn send_message_with_delay(
-        &self,
-        queue_name: &str,
-        message_id: &str,
-        body: &str,
-        attributes: Option<&str>,
-        deduplication_id: Option<&str>,
-        delay_until: Option<&str>,
-    ) -> Result<()> {
-        // Call the enhanced method with no message group ID for backwards compatibility
-        self.send_message_with_delay_and_group(queue_name, message_id, body, attributes, deduplication_id, delay_until, None).await
-    }
 
     // Enhanced send_message with DelaySeconds, FIFO, and Message Groups support
     pub async fn send_message_with_delay_and_group(

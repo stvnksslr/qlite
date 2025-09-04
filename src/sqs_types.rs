@@ -128,6 +128,15 @@ pub struct SetQueueAttributesResponse {
 pub struct SetQueueAttributesResult {}
 
 #[derive(Debug, Serialize)]
+pub struct DeleteQueueResponse {
+    #[serde(rename = "DeleteQueueResult")]
+    pub delete_queue_result: DeleteQueueResult,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeleteQueueResult {}
+
+#[derive(Debug, Serialize)]
 pub struct SendMessageBatchResponse {
     #[serde(rename = "SendMessageBatchResult")]
     pub send_message_batch_result: SendMessageBatchResult,

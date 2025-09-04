@@ -167,7 +167,7 @@ run_test "Create Dead Letter Queue" \
 
 # Test 5.2: Create queue with DLQ policy
 run_test "Create Queue with DLQ Policy" \
-    "aws sqs create-queue --endpoint-url $ENDPOINT_URL --queue-name test-queue-with-dlq --attributes 'RedrivePolicy={\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:123456789012:test-dlq\",\"maxReceiveCount\":2}'" \
+    "echo '{\"RedrivePolicy\": \"{\\\"deadLetterTargetArn\\\":\\\"arn:aws:sqs:us-east-1:123456789012:test-dlq\\\",\\\"maxReceiveCount\\\":2}\"}' | aws sqs create-queue --endpoint-url $ENDPOINT_URL --queue-name test-queue-with-dlq --attributes file:///dev/stdin" \
     "true"
 
 echo "⏱️  Phase 6: Long Polling"

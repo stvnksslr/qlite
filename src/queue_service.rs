@@ -243,43 +243,6 @@ impl QueueService {
     }
 
     // Background cleanup task for production performance
-    pub async fn start_background_cleanup(&self, retention_config: crate::config::RetentionConfig) {
-        let db = self.db.clone();
-        let notifiers = self.message_notifiers.clone();
-        
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(
-                std::time::Duration::from_secs(retention_config.cleanup_interval_seconds as u64)
-            );
-            
-            loop {
-                interval.tick().await;
-                
-                // Perform cleanup
-                match db.cleanup_expired_messages(&retention_config).await {
-                    Ok(cleaned_count) => {
-                        if cleaned_count > 0 {
-                            tracing::info!("Background cleanup removed {} expired messages", cleaned_count);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("Background cleanup failed: {:?}", e);
-                    }
-                }
-                
-                // Cleanup unused notification channels
-                let mut channels = notifiers.write().await;
-                let initial_count = channels.len();
-                channels.retain(|_queue_name, sender| {
-                    sender.receiver_count() > 0
-                });
-                let cleaned_channels = initial_count - channels.len();
-                if cleaned_channels > 0 {
-                    tracing::debug!("Cleaned up {} unused notification channels", cleaned_channels);
-                }
-            }
-        });
-    }
 
     // Enhanced queue configuration
     #[allow(dead_code)]
@@ -466,7 +429,7 @@ impl QueueService {
         
         // Transform database results back to service layer format
         let mut service_results = Vec::new();
-        for (i, result) in results.into_iter().enumerate() {
+        for (_i, result) in results.into_iter().enumerate() {
             match result {
                 Ok(_) => service_results.push(Ok("Success".to_string())), // In real SQS, this would be MessageId
                 Err(e) => service_results.push(Err(e))
