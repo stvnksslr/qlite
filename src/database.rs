@@ -2,6 +2,7 @@ use chrono::Utc;
 use tokio_rusqlite::{Connection, OptionalExtension, Result};
 use tracing::info;
 
+#[derive(Clone)]
 pub struct Database {
     connection: Connection,
 }
@@ -84,6 +85,38 @@ impl Database {
                     [],
                 );
                 
+                // Add DelaySeconds support columns
+                let _ = conn.execute(
+                    "ALTER TABLE messages ADD COLUMN delay_until TEXT",
+                    [],
+                );
+                let _ = conn.execute(
+                    "ALTER TABLE messages ADD COLUMN message_group_id TEXT",
+                    [],
+                );
+                let _ = conn.execute(
+                    "ALTER TABLE messages ADD COLUMN sequence_number INTEGER",
+                    [],
+                );
+                
+                // Create queue_config table for SetQueueAttributes support
+                conn.execute(
+                    r#"
+                    CREATE TABLE IF NOT EXISTS queue_config (
+                        name TEXT PRIMARY KEY,
+                        is_fifo BOOLEAN DEFAULT FALSE,
+                        content_based_deduplication BOOLEAN DEFAULT FALSE,
+                        visibility_timeout_seconds INTEGER DEFAULT 30,
+                        message_retention_period_seconds INTEGER DEFAULT 1209600,
+                        max_receive_count INTEGER,
+                        dead_letter_target_arn TEXT,
+                        delay_seconds INTEGER DEFAULT 0,
+                        receive_message_wait_time_seconds INTEGER DEFAULT 0
+                    )
+                    "#,
+                    [],
+                )?;
+                
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_messages_queue_name ON messages(queue_name)",
                     [],
@@ -108,6 +141,42 @@ impl Database {
                     "#,
                     [],
                 )?;
+                
+                // Create dead_letter_messages table for DLQ support
+                conn.execute(
+                    r#"
+                    CREATE TABLE IF NOT EXISTS dead_letter_messages (
+                        id TEXT PRIMARY KEY,
+                        original_queue_name TEXT NOT NULL,
+                        dlq_name TEXT NOT NULL,
+                        failure_reason TEXT NOT NULL,
+                        moved_at TEXT NOT NULL,
+                        original_message_data TEXT NOT NULL,
+                        original_body TEXT NOT NULL,
+                        original_attributes TEXT,
+                        receive_count INTEGER DEFAULT 0,
+                        original_created_at TEXT NOT NULL
+                    )
+                    "#,
+                    [],
+                )?;
+                
+                // Create indexes for DLQ operations
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_dlq_messages_dlq_name ON dead_letter_messages(dlq_name)",
+                    [],
+                )?;
+                
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_dlq_messages_original_queue ON dead_letter_messages(original_queue_name)",
+                    [],
+                )?;
+                
+                // Add receive_count column to messages table for DLQ functionality
+                let _ = conn.execute(
+                    "ALTER TABLE messages ADD COLUMN receive_count INTEGER DEFAULT 0",
+                    [],
+                );
                 
                 Ok(())
             })
@@ -149,6 +218,17 @@ impl Database {
                 
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_messages_active_queue ON messages(queue_name, status) WHERE status = 'active'",
+                    [],
+                )?;
+                
+                // Add indexes for DelaySeconds and FIFO support
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_messages_delay ON messages(queue_name, delay_until)",
+                    [],
+                )?;
+                
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_messages_fifo_order ON messages(queue_name, message_group_id, sequence_number)",
                     [],
                 )?;
                 
@@ -257,17 +337,44 @@ impl Database {
 
         self.connection
             .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    r#"
-                    SELECT id, body, created_at, attributes 
-                    FROM messages 
-                    WHERE queue_name = ?1 
-                    AND status = 'active'
-                    AND (visibility_timeout IS NULL OR visibility_timeout < datetime('now'))
-                    ORDER BY created_at ASC 
-                    LIMIT 1
-                    "#,
-                )?;
+                // Check if this is a FIFO queue to determine ordering
+                let queue_config_result: Option<(bool,)> = conn.prepare(
+                    "SELECT is_fifo FROM queue_config WHERE name = ?1"
+                )?.query_row([&queue_name], |row| {
+                    Ok((row.get::<_, i32>(0)? != 0,))
+                }).optional()?;
+                
+                let is_fifo = queue_config_result.map(|(fifo,)| fifo).unwrap_or(false);
+                
+                let mut stmt = if is_fifo {
+                    // For FIFO queues, order by sequence_number for strict FIFO ordering
+                    conn.prepare(
+                        r#"
+                        SELECT id, body, created_at, attributes 
+                        FROM messages 
+                        WHERE queue_name = ?1 
+                        AND status = 'active'
+                        AND (visibility_timeout IS NULL OR visibility_timeout < datetime('now'))
+                        AND (delay_until IS NULL OR delay_until < datetime('now'))
+                        ORDER BY sequence_number ASC 
+                        LIMIT 1
+                        "#,
+                    )?
+                } else {
+                    // For standard queues, order by created_at
+                    conn.prepare(
+                        r#"
+                        SELECT id, body, created_at, attributes 
+                        FROM messages 
+                        WHERE queue_name = ?1 
+                        AND status = 'active'
+                        AND (visibility_timeout IS NULL OR visibility_timeout < datetime('now'))
+                        AND (delay_until IS NULL OR delay_until < datetime('now'))
+                        ORDER BY created_at ASC 
+                        LIMIT 1
+                        "#,
+                    )?
+                };
 
                 let mut rows = stmt.query_map([&queue_name], |row| {
                     Ok((
@@ -281,11 +388,54 @@ impl Database {
                 if let Some(row) = rows.next() {
                     let (id, body, created_at, attributes) = row?;
                     
-                    // Set visibility timeout (30 seconds from now) and mark as processed
+                    // Get current receive count and queue configuration
+                    let current_receive_count: i32 = conn.prepare(
+                        "SELECT receive_count FROM messages WHERE id = ?1"
+                    )?.query_row([&id], |row| Ok(row.get(0)?))?;
+                    
+                    // Check for DLQ configuration
+                    let queue_config = conn.prepare(
+                        "SELECT max_receive_count, dead_letter_target_arn FROM queue_config WHERE name = ?1"
+                    )?.query_row([&queue_name], |row| {
+                        Ok((row.get::<_, Option<i32>>(0)?, row.get::<_, Option<String>>(1)?))
+                    }).optional()?;
+                    
+                    let new_receive_count = current_receive_count + 1;
+                    
+                    // Check if message should be moved to DLQ
+                    if let Some((Some(max_receive_count), Some(_dlq_arn))) = queue_config {
+                        if new_receive_count > max_receive_count {
+                            // Move to DLQ instead of returning the message
+                            let reason = format!("Message exceeded max receive count of {}", max_receive_count);
+                            
+                            // Get message details for DLQ move
+                            let message_details = conn.prepare(
+                                "SELECT queue_name, body, created_at, attributes FROM messages WHERE id = ?1"
+                            )?.query_row([&id], |row| {
+                                Ok((
+                                    row.get::<_, String>(0)?,
+                                    row.get::<_, String>(1)?,
+                                    row.get::<_, String>(2)?,
+                                    row.get::<_, Option<String>>(3)?,
+                                ))
+                            })?;
+                            
+                            // This will be handled by a separate call - for now mark as failed and let DLQ processing handle it
+                            conn.execute(
+                                "UPDATE messages SET status = 'dlq_pending', receive_count = ?2 WHERE id = ?1",
+                                [&id, &new_receive_count.to_string()],
+                            )?;
+                            
+                            // Return None to indicate message was moved to DLQ processing
+                            return Ok(None);
+                        }
+                    }
+                    
+                    // Set visibility timeout (30 seconds from now) and increment receive count
                     let timeout = (Utc::now() + chrono::Duration::seconds(30)).to_rfc3339();
                     conn.execute(
-                        "UPDATE messages SET visibility_timeout = ?1, receive_count = receive_count + 1, status = 'processing', processed_at = ?3 WHERE id = ?2",
-                        [&timeout, &id, &processed_at],
+                        "UPDATE messages SET visibility_timeout = ?1, receive_count = ?2, status = 'processing', processed_at = ?3 WHERE id = ?4",
+                        [&timeout, &new_receive_count.to_string(), &processed_at, &id],
                     )?;
                     
                     Ok(Some((id, body, created_at, attributes)))
@@ -446,29 +596,589 @@ impl Database {
             .await
     }
 
-    // Placeholder methods for advanced features (to be implemented)
-    #[allow(dead_code)]
+    // FIFO queue creation with configuration
     pub async fn create_queue_with_config(&self, config: &crate::config::QueueConfig) -> Result<()> {
-        // For now, just create a basic queue
-        self.create_queue(&config.name).await
+        // Create the basic queue first
+        self.create_queue(&config.name).await?;
+        
+        // Store the configuration in queue_config table
+        let config_name = config.name.clone();
+        let is_fifo = config.is_fifo;
+        let content_based_dedup = config.content_based_deduplication;
+        let visibility_timeout = config.visibility_timeout_seconds as i32;
+        let retention_period = config.message_retention_period_seconds as i32;
+        let max_receive_count = config.max_receive_count.map(|v| v as i32);
+        let delay_seconds = config.delay_seconds as i32;
+        let wait_time = config.receive_message_wait_time_seconds as i32;
+        let dlq_arn = config.dead_letter_target_arn.clone();
+        
+        self.connection
+            .call(move |conn| {
+                conn.execute(
+                    r#"
+                    INSERT OR REPLACE INTO queue_config 
+                    (name, is_fifo, content_based_deduplication, visibility_timeout_seconds, 
+                     message_retention_period_seconds, max_receive_count, dead_letter_target_arn, 
+                     delay_seconds, receive_message_wait_time_seconds) 
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                    "#,
+                    [
+                        &config_name,
+                        &(is_fifo as i32).to_string(),
+                        &(content_based_dedup as i32).to_string(),
+                        &visibility_timeout.to_string(),
+                        &retention_period.to_string(),
+                        &max_receive_count.map(|v| v.to_string()).unwrap_or_else(|| "NULL".to_string()),
+                        &dlq_arn.unwrap_or_else(|| "NULL".to_string()),
+                        &delay_seconds.to_string(),
+                        &wait_time.to_string()
+                    ],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
+    pub async fn get_queue_config(&self, queue_name: &str) -> Result<Option<crate::config::QueueConfig>> {
+        let queue_name = queue_name.to_string();
+        
+        self.connection
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    r#"
+                    SELECT name, is_fifo, content_based_deduplication, visibility_timeout_seconds,
+                           message_retention_period_seconds, max_receive_count, dead_letter_target_arn,
+                           delay_seconds, receive_message_wait_time_seconds
+                    FROM queue_config WHERE name = ?1
+                    "#,
+                )?;
+                
+                let result = stmt.query_row([&queue_name], |row| {
+                    let max_receive_count: Option<i32> = row.get::<_, Option<i32>>(5)?;
+                    let dead_letter_target_arn: Option<String> = row.get::<_, Option<String>>(6)?;
+                    
+                    Ok(crate::config::QueueConfig {
+                        name: row.get::<_, String>(0)?,
+                        is_fifo: row.get::<_, i32>(1)? != 0,
+                        content_based_deduplication: row.get::<_, i32>(2)? != 0,
+                        visibility_timeout_seconds: row.get::<_, i32>(3)? as u32,
+                        message_retention_period_seconds: row.get::<_, i32>(4)? as u32,
+                        max_receive_count: max_receive_count.map(|v| v as u32),
+                        dead_letter_target_arn,
+                        delay_seconds: row.get::<_, i32>(7)? as u32,
+                        receive_message_wait_time_seconds: row.get::<_, i32>(8)? as u32,
+                    })
+                }).optional()?;
+                
+                Ok(result)
+            })
+            .await
     }
 
     #[allow(dead_code)]
-    pub async fn get_queue_config(&self, _queue_name: &str) -> Result<Option<crate::config::QueueConfig>> {
-        // Placeholder - return None for now
-        Ok(None)
+    pub async fn move_message_to_dlq(&self, message_id: &str, failure_reason: &str) -> Result<bool> {
+        let message_id = message_id.to_string();
+        let failure_reason = failure_reason.to_string();
+        let moved_at = Utc::now().to_rfc3339();
+        
+        self.connection
+            .call(move |conn| {
+                // First, get the message details and queue configuration
+                let message_result = conn.prepare(
+                    "SELECT queue_name, body, created_at, attributes, receive_count FROM messages WHERE id = ?1 AND status != 'deleted'"
+                )?.query_row([&message_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,  // queue_name
+                        row.get::<_, String>(1)?,  // body
+                        row.get::<_, String>(2)?,  // created_at
+                        row.get::<_, Option<String>>(3)?,  // attributes
+                        row.get::<_, i32>(4)?      // receive_count
+                    ))
+                });
+                
+                if let Ok((queue_name, body, created_at, attributes, receive_count)) = message_result {
+                    // Get DLQ configuration from queue_config
+                    if let Some(dlq_arn) = conn.prepare(
+                        "SELECT dead_letter_target_arn FROM queue_config WHERE name = ?1"
+                    )?.query_row([&queue_name], |row| {
+                        Ok(row.get::<_, Option<String>>(0)?)
+                    }).optional()? {
+                        if let Some(dlq_name) = dlq_arn {
+                            // Extract DLQ name from ARN (simplified - assume it's just the queue name for now)
+                            let dlq_queue_name = dlq_name.split('/').last().unwrap_or(&dlq_name);
+                            
+                            // Create JSON representation of original message data
+                            let original_message_data = serde_json::json!({
+                                "messageId": message_id,
+                                "body": body,
+                                "attributes": attributes,
+                                "createdAt": created_at,
+                                "receiveCount": receive_count
+                            }).to_string();
+                            
+                            // Insert into dead_letter_messages table
+                            conn.execute(
+                                r#"
+                                INSERT INTO dead_letter_messages 
+                                (id, original_queue_name, dlq_name, failure_reason, moved_at, 
+                                 original_message_data, original_body, original_attributes, 
+                                 receive_count, original_created_at) 
+                                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                                "#,
+                                [
+                                    &message_id,
+                                    &queue_name,
+                                    &dlq_queue_name.to_string(),
+                                    &failure_reason,
+                                    &moved_at,
+                                    &original_message_data,
+                                    &body,
+                                    &attributes.unwrap_or_else(|| "".to_string()),
+                                    &receive_count.to_string(),
+                                    &created_at,
+                                ]
+                            )?;
+                            
+                            // Remove original message from messages table
+                            conn.execute(
+                                "DELETE FROM messages WHERE id = ?1",
+                                [&message_id]
+                            )?;
+                            
+                            Ok(true)
+                        } else {
+                            // No DLQ configured for this queue
+                            Ok(false)
+                        }
+                    } else {
+                        // No queue configuration found
+                        Ok(false)
+                    }
+                } else {
+                    // Message not found or already deleted
+                    Ok(false)
+                }
+            })
+            .await
     }
 
-    #[allow(dead_code)]
-    pub async fn move_message_to_dlq(&self, _message_id: &str, _failure_reason: &str) -> Result<bool> {
-        // Placeholder - return false for now
-        Ok(false)
+    pub async fn get_dlq_messages(&self, dlq_name: &str) -> Result<Vec<(String, String, String, String, Option<String>)>> {
+        let dlq_name = dlq_name.to_string();
+        
+        self.connection
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    r#"
+                    SELECT id, original_body, moved_at, failure_reason, original_attributes
+                    FROM dead_letter_messages 
+                    WHERE dlq_name = ?1
+                    ORDER BY moved_at DESC
+                    "#
+                )?;
+                
+                let rows = stmt.query_map([&dlq_name], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,        // id
+                        row.get::<_, String>(1)?,        // original_body
+                        row.get::<_, String>(2)?,        // moved_at
+                        row.get::<_, String>(3)?,        // failure_reason
+                        row.get::<_, Option<String>>(4)? // original_attributes
+                    ))
+                })?;
+                
+                let mut messages = Vec::new();
+                for row in rows {
+                    messages.push(row?);
+                }
+                
+                Ok(messages)
+            })
+            .await
+    }
+
+    pub async fn redrive_dlq_messages(&self, dlq_name: &str, source_queue: &str, max_messages: Option<u32>) -> Result<u32> {
+        let dlq_name = dlq_name.to_string();
+        let source_queue = source_queue.to_string();
+        let limit = max_messages.unwrap_or(10); // AWS default
+        
+        self.connection
+            .call(move |conn| {
+                // Get messages from DLQ to redrive
+                let mut stmt = conn.prepare(
+                    r#"
+                    SELECT id, original_body, original_attributes, original_created_at
+                    FROM dead_letter_messages 
+                    WHERE dlq_name = ?1 AND original_queue_name = ?2
+                    LIMIT ?3
+                    "#
+                )?;
+                
+                let rows = stmt.query_map([&dlq_name, &source_queue, &limit.to_string()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,        // id
+                        row.get::<_, String>(1)?,        // original_body  
+                        row.get::<_, Option<String>>(2)?, // original_attributes
+                        row.get::<_, String>(3)?,        // original_created_at
+                    ))
+                })?;
+                
+                let mut redriven_count = 0;
+                let now = chrono::Utc::now().to_rfc3339();
+                
+                for row in rows {
+                    let (message_id, body, attributes, _created_at) = row?;
+                    
+                    // Insert message back into original queue with new ID and timestamp
+                    let new_message_id = uuid::Uuid::new_v4().to_string();
+                    conn.execute(
+                        "INSERT INTO messages (id, queue_name, body, created_at, attributes, status, receive_count) VALUES (?1, ?2, ?3, ?4, ?5, 'active', 0)",
+                        [
+                            &new_message_id,
+                            &source_queue,
+                            &body,
+                            &now,
+                            &attributes.unwrap_or_else(|| "".to_string()),
+                        ],
+                    )?;
+                    
+                    // Remove from DLQ
+                    conn.execute(
+                        "DELETE FROM dead_letter_messages WHERE id = ?1",
+                        [&message_id]
+                    )?;
+                    
+                    redriven_count += 1;
+                }
+                
+                Ok(redriven_count)
+            })
+            .await
+    }
+
+    pub async fn purge_dlq(&self, dlq_name: &str) -> Result<u32> {
+        let dlq_name = dlq_name.to_string();
+        
+        self.connection
+            .call(move |conn| {
+                let changes = conn.execute(
+                    "DELETE FROM dead_letter_messages WHERE dlq_name = ?1",
+                    [&dlq_name]
+                )?;
+                Ok(changes as u32)
+            })
+            .await
     }
 
     #[allow(dead_code)]
     pub async fn record_queue_metric(&self, _queue_name: &str, _metric: &QueueMetric) -> Result<()> {
         // Placeholder - do nothing for now
         Ok(())
+    }
+
+    // Enhanced send_message with DelaySeconds and FIFO support
+    pub async fn send_message_with_delay(
+        &self,
+        queue_name: &str,
+        message_id: &str,
+        body: &str,
+        attributes: Option<&str>,
+        deduplication_id: Option<&str>,
+        delay_until: Option<&str>,
+    ) -> Result<()> {
+        // Call the enhanced method with no message group ID for backwards compatibility
+        self.send_message_with_delay_and_group(queue_name, message_id, body, attributes, deduplication_id, delay_until, None).await
+    }
+
+    // Enhanced send_message with DelaySeconds, FIFO, and Message Groups support
+    pub async fn send_message_with_delay_and_group(
+        &self,
+        queue_name: &str,
+        message_id: &str,
+        body: &str,
+        attributes: Option<&str>,
+        deduplication_id: Option<&str>,
+        delay_until: Option<&str>,
+        message_group_id: Option<&str>,
+    ) -> Result<()> {
+        // Check if this is a FIFO queue and get configuration
+        let queue_config = self.get_queue_config(queue_name).await?;
+        let queue_name = queue_name.to_string();
+        let message_id = message_id.to_string();
+        let body = body.to_string();
+        let created_at = Utc::now().to_rfc3339();
+        let attributes = attributes.map(|s| s.to_string());
+        let deduplication_id = deduplication_id.map(|s| s.to_string());
+        let delay_until = delay_until.map(|s| s.to_string());
+        let message_group_id = message_group_id.map(|s| s.to_string());
+        
+        let is_fifo = queue_config.as_ref().map(|c| c.is_fifo).unwrap_or(false);
+        
+        // For FIFO queues, ensure MessageGroupId is provided
+        let message_group_id = if is_fifo && message_group_id.is_none() {
+            // Use a default message group ID if none provided for backwards compatibility
+            Some("default".to_string())
+        } else {
+            message_group_id
+        };
+        
+        // For FIFO queues, handle content-based deduplication if enabled
+        let effective_dedup_id = if is_fifo {
+            match (deduplication_id.clone(), queue_config.as_ref()) {
+                (Some(id), _) => Some(id), // Explicit deduplication ID provided
+                (None, Some(config)) if config.content_based_deduplication => {
+                    // Generate SHA-256 hash of message body for content-based deduplication
+                    Some(format!("{:x}", md5::compute(body.as_bytes()))) // Using MD5 for simplicity
+                },
+                _ => None
+            }
+        } else {
+            deduplication_id.clone()
+        };
+
+        // Check for duplicate deduplication_id within the last 5 minutes
+        if let Some(ref dedup_id) = effective_dedup_id {
+            let five_minutes_ago = (Utc::now() - chrono::Duration::minutes(5)).to_rfc3339();
+            let queue_name_check = queue_name.clone();
+            let dedup_id_check = dedup_id.clone();
+            
+            let duplicate_exists = self.connection
+                .call(move |conn| {
+                    let mut stmt = conn.prepare(
+                        "SELECT COUNT(*) FROM messages WHERE queue_name = ?1 AND deduplication_id = ?2 AND created_at > ?3"
+                    )?;
+                    let count: i64 = stmt.query_row([&queue_name_check, &dedup_id_check, &five_minutes_ago], |row| {
+                        row.get(0)
+                    })?;
+                    Ok(count > 0)
+                })
+                .await?;
+                
+            if duplicate_exists {
+                return Ok(()); // Silently ignore duplicate
+            }
+        }
+
+        self.connection
+            .call(move |conn| {
+                // Generate sequence number for FIFO queues
+                let sequence_number = if is_fifo {
+                    // Get the next sequence number for this queue
+                    let mut stmt = conn.prepare(
+                        "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM messages WHERE queue_name = ?1"
+                    )?;
+                    let seq_num: i64 = stmt.query_row([&queue_name], |row| row.get(0))?;
+                    Some(seq_num)
+                } else {
+                    None
+                };
+                
+                conn.execute(
+                    "INSERT INTO messages (id, queue_name, body, created_at, attributes, deduplication_id, delay_until, sequence_number, message_group_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    [
+                        &Some(&message_id), 
+                        &Some(&queue_name), 
+                        &Some(&body), 
+                        &Some(&created_at),
+                        &attributes.as_ref(),
+                        &effective_dedup_id.as_ref(),
+                        &delay_until.as_ref(),
+                        &sequence_number.map(|n| n.to_string()).as_ref(),
+                        &message_group_id.as_ref()
+                    ],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
+    // SetQueueAttributes support
+    pub async fn set_queue_attributes(&self, queue_name: &str, attributes: &std::collections::HashMap<String, String>) -> Result<()> {
+        let queue_name = queue_name.to_string();
+        
+        // Parse common SQS attributes
+        let visibility_timeout = attributes.get("VisibilityTimeout").and_then(|v| v.parse::<i32>().ok()).unwrap_or(30);
+        let message_retention_period = attributes.get("MessageRetentionPeriod").and_then(|v| v.parse::<i32>().ok()).unwrap_or(1209600);
+        let delay_seconds = attributes.get("DelaySeconds").and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
+        let receive_message_wait_time = attributes.get("ReceiveMessageWaitTimeSeconds").and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
+        
+        // Parse RedrivePolicy JSON
+        let (max_receive_count, dead_letter_target_arn) = if let Some(redrive_policy) = attributes.get("RedrivePolicy") {
+            // Parse JSON: {"deadLetterTargetArn":"arn:aws:sqs:region:account:queue-name","maxReceiveCount":3}
+            if let Ok(policy) = serde_json::from_str::<serde_json::Value>(redrive_policy) {
+                let max_count = policy.get("maxReceiveCount")
+                    .and_then(|v| v.as_i64())
+                    .map(|v| v as i32);
+                let dlq_arn = policy.get("deadLetterTargetArn")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                (max_count, dlq_arn)
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+        
+        self.connection
+            .call(move |conn| {
+                conn.execute(
+                    r#"
+                    INSERT OR REPLACE INTO queue_config 
+                    (name, visibility_timeout_seconds, message_retention_period_seconds, delay_seconds, 
+                     receive_message_wait_time_seconds, max_receive_count, dead_letter_target_arn) 
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                    "#,
+                    [
+                        &queue_name,
+                        &visibility_timeout.to_string(),
+                        &message_retention_period.to_string(), 
+                        &delay_seconds.to_string(),
+                        &receive_message_wait_time.to_string(),
+                        &max_receive_count.map(|v| v.to_string()).unwrap_or_else(|| "".to_string()),
+                        &dead_letter_target_arn.unwrap_or_else(|| "".to_string())
+                    ],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
+    // Batch operations for Phase 2
+    pub async fn send_messages_batch(
+        &self,
+        messages: Vec<(String, String, String, Option<String>, Option<String>, Option<String>)> // (queue_name, message_id, body, attributes, deduplication_id, delay_until)
+    ) -> Result<Vec<std::result::Result<(), String>>> {
+        let created_at = Utc::now().to_rfc3339();
+        let mut results = Vec::new();
+
+        self.connection
+            .call(move |conn| {
+                let tx = conn.unchecked_transaction()?;
+                
+                for (queue_name, message_id, body, attributes, deduplication_id, delay_until) in messages {
+                    let result = (|| {
+                        // Check for duplicate deduplication_id within the last 5 minutes if provided
+                        if let Some(ref dedup_id) = deduplication_id {
+                            let five_minutes_ago = (Utc::now() - chrono::Duration::minutes(5)).to_rfc3339();
+                            let mut stmt = tx.prepare_cached(
+                                "SELECT COUNT(*) FROM messages WHERE queue_name = ?1 AND deduplication_id = ?2 AND created_at > ?3"
+                            )?;
+                            let count: i64 = stmt.query_row([&queue_name, dedup_id, &five_minutes_ago], |row| {
+                                row.get(0)
+                            })?;
+                            
+                            if count > 0 {
+                                return Ok(()); // Silently ignore duplicate
+                            }
+                        }
+
+                        tx.execute(
+                            "INSERT INTO messages (id, queue_name, body, created_at, attributes, deduplication_id, delay_until) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                            [
+                                &Some(&message_id), 
+                                &Some(&queue_name), 
+                                &Some(&body), 
+                                &Some(&created_at),
+                                &attributes.as_ref(),
+                                &deduplication_id.as_ref(),
+                                &delay_until.as_ref()
+                            ],
+                        )?;
+                        Ok(())
+                    })();
+
+                    results.push(result.map_err(|e: rusqlite::Error| e.to_string()));
+                }
+                
+                tx.commit()?;
+                Ok(results)
+            })
+            .await
+    }
+
+    pub async fn delete_messages_batch(
+        &self,
+        message_ids: Vec<String>
+    ) -> Result<Vec<std::result::Result<bool, String>>> {
+        let deleted_at = Utc::now().to_rfc3339();
+        let mut results = Vec::new();
+
+        self.connection
+            .call(move |conn| {
+                let tx = conn.unchecked_transaction()?;
+                
+                for message_id in message_ids {
+                    let result = (|| {
+                        let changes = tx.execute(
+                            "UPDATE messages SET status = 'deleted', deleted_at = ?2 WHERE id = ?1",
+                            [&message_id, &deleted_at],
+                        )?;
+                        Ok(changes > 0)
+                    })();
+
+                    results.push(result.map_err(|e: rusqlite::Error| e.to_string()));
+                }
+                
+                tx.commit()?;
+                Ok(results)
+            })
+            .await
+    }
+
+    pub async fn receive_messages_batch(
+        &self,
+        queue_name: &str,
+        max_messages: u32
+    ) -> Result<Vec<(String, String, String, Option<String>)>> {
+        let queue_name = queue_name.to_string();
+        let processed_at = Utc::now().to_rfc3339();
+        let max_messages = max_messages.min(10) as i64; // AWS SQS limit
+
+        self.connection
+            .call(move |conn| {
+                let tx = conn.unchecked_transaction()?;
+                
+                let mut stmt = tx.prepare(
+                    r#"
+                    SELECT id, body, created_at, attributes 
+                    FROM messages 
+                    WHERE queue_name = ?1 
+                    AND status = 'active'
+                    AND (visibility_timeout IS NULL OR visibility_timeout < datetime('now'))
+                    AND (delay_until IS NULL OR delay_until < datetime('now'))
+                    ORDER BY created_at ASC 
+                    LIMIT ?2
+                    "#,
+                )?;
+
+                let rows = stmt.query_map([&queue_name, &max_messages.to_string()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                })?;
+
+                let mut messages = Vec::new();
+                for row in rows {
+                    let (id, body, created_at, attributes) = row?;
+                    
+                    // Set visibility timeout (30 seconds from now) and mark as processing
+                    let timeout = (Utc::now() + chrono::Duration::seconds(30)).to_rfc3339();
+                    tx.execute(
+                        "UPDATE messages SET visibility_timeout = ?1, receive_count = receive_count + 1, status = 'processing', processed_at = ?3 WHERE id = ?2",
+                        [&timeout, &id, &processed_at],
+                    )?;
+                    
+                    messages.push((id, body, created_at, attributes));
+                }
+                
+                drop(stmt); // Explicitly drop the statement before committing
+                tx.commit()?;
+                Ok(messages)
+            })
+            .await
     }
 
     pub async fn cleanup_expired_messages(&self, retention_config: &crate::config::RetentionConfig) -> Result<u32> {

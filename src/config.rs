@@ -186,46 +186,42 @@ impl Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueConfig {
     pub name: String,
-    pub queue_type: QueueType,
-    pub visibility_timeout_seconds: u32,
-    pub message_retention_seconds: u32,
-    pub max_receive_count: u32,
-    pub dead_letter_queue: Option<String>,
-    pub fifo_throughput_limit: Option<u32>,
+    pub is_fifo: bool,
     pub content_based_deduplication: bool,
+    pub visibility_timeout_seconds: u32,
+    pub message_retention_period_seconds: u32,
+    pub max_receive_count: Option<u32>,
+    pub dead_letter_target_arn: Option<String>,
+    pub delay_seconds: u32,
+    pub receive_message_wait_time_seconds: u32,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub enum QueueType {
-    Standard,
-    Fifo,
-}
+// QueueType enum removed - using is_fifo boolean instead
 
 impl Default for QueueConfig {
     fn default() -> Self {
         let defaults = Config::default().queues;
         Self {
             name: String::new(),
-            queue_type: QueueType::Standard,
-            visibility_timeout_seconds: defaults.visibility_timeout_seconds,
-            message_retention_seconds: defaults.message_retention_seconds,
-            max_receive_count: defaults.max_receive_count,
-            dead_letter_queue: None,
-            fifo_throughput_limit: Some(defaults.fifo_throughput_limit),
+            is_fifo: false,
             content_based_deduplication: false,
+            visibility_timeout_seconds: defaults.visibility_timeout_seconds,
+            message_retention_period_seconds: defaults.message_retention_seconds,
+            max_receive_count: Some(defaults.max_receive_count),
+            dead_letter_target_arn: None,
+            delay_seconds: 0,
+            receive_message_wait_time_seconds: defaults.receive_message_wait_time_seconds,
         }
     }
 }
 
 impl QueueConfig {
     #[allow(dead_code)]
-    pub fn new(name: String, queue_type: QueueType) -> Self {
-        let content_based_deduplication = queue_type == QueueType::Fifo;
-        
+    pub fn new(name: String, is_fifo: bool) -> Self {
         Self {
             name,
-            queue_type,
-            content_based_deduplication,
+            is_fifo,
+            content_based_deduplication: is_fifo,
             ..Self::default()
         }
     }
@@ -236,7 +232,7 @@ impl QueueConfig {
             return Err(ConfigError::Validation("Queue name cannot be empty".to_string()));
         }
         
-        if self.queue_type == QueueType::Fifo {
+        if self.is_fifo {
             if !self.name.ends_with(".fifo") {
                 return Err(ConfigError::Validation("FIFO queue names must end with .fifo".to_string()));
             }
@@ -248,16 +244,18 @@ impl QueueConfig {
             return Err(ConfigError::Validation("Visibility timeout must be > 0".to_string()));
         }
         
-        if self.message_retention_seconds < 60 {
+        if self.message_retention_period_seconds < 60 {
             return Err(ConfigError::Validation("Message retention must be >= 60 seconds".to_string()));
         }
         
-        if self.message_retention_seconds > 1209600 { // 14 days
+        if self.message_retention_period_seconds > 1209600 { // 14 days
             return Err(ConfigError::Validation("Message retention cannot exceed 14 days".to_string()));
         }
         
-        if self.max_receive_count == 0 {
-            return Err(ConfigError::Validation("Max receive count must be > 0".to_string()));
+        if let Some(max_count) = self.max_receive_count {
+            if max_count == 0 {
+                return Err(ConfigError::Validation("Max receive count must be > 0".to_string()));
+            }
         }
         
         Ok(())
@@ -297,7 +295,7 @@ mod tests {
     
     #[test]
     fn test_fifo_queue_validation() {
-        let mut config = QueueConfig::new("test.fifo".to_string(), QueueType::Fifo);
+        let mut config = QueueConfig::new("test.fifo".to_string(), true);
         assert!(config.validate().is_ok());
         
         config.name = "test".to_string();
@@ -306,7 +304,7 @@ mod tests {
     
     #[test]
     fn test_standard_queue_validation() {
-        let mut config = QueueConfig::new("test".to_string(), QueueType::Standard);
+        let mut config = QueueConfig::new("test".to_string(), false);
         assert!(config.validate().is_ok());
         
         config.name = "test.fifo".to_string();

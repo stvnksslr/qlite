@@ -107,6 +107,83 @@ pub struct CreateQueueResult {
 }
 
 #[derive(Debug, Serialize)]
+pub struct GetQueueUrlResponse {
+    #[serde(rename = "GetQueueUrlResult")]
+    pub get_queue_url_result: GetQueueUrlResult,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GetQueueUrlResult {
+    #[serde(rename = "QueueUrl")]
+    pub queue_url: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetQueueAttributesResponse {
+    #[serde(rename = "SetQueueAttributesResult")]
+    pub set_queue_attributes_result: SetQueueAttributesResult,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetQueueAttributesResult {}
+
+#[derive(Debug, Serialize)]
+pub struct SendMessageBatchResponse {
+    #[serde(rename = "SendMessageBatchResult")]
+    pub send_message_batch_result: SendMessageBatchResult,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SendMessageBatchResult {
+    #[serde(rename = "SendMessageBatchResultEntry", default)]
+    pub successful: Vec<SendMessageBatchResultEntry>,
+    #[serde(rename = "BatchResultErrorEntry", default)]
+    pub failed: Vec<BatchResultErrorEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SendMessageBatchResultEntry {
+    #[serde(rename = "Id")]
+    pub id: String,
+    #[serde(rename = "MessageId")]
+    pub message_id: String,
+    #[serde(rename = "MD5OfBody")]
+    pub md5_of_body: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BatchResultErrorEntry {
+    #[serde(rename = "Id")]
+    pub id: String,
+    #[serde(rename = "Code")]
+    pub code: String,
+    #[serde(rename = "Message")]
+    pub message: String,
+    #[serde(rename = "SenderFault")]
+    pub sender_fault: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeleteMessageBatchResponse {
+    #[serde(rename = "DeleteMessageBatchResult")]
+    pub delete_message_batch_result: DeleteMessageBatchResult,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeleteMessageBatchResult {
+    #[serde(rename = "DeleteMessageBatchResultEntry", default)]
+    pub successful: Vec<DeleteMessageBatchResultEntry>,
+    #[serde(rename = "BatchResultErrorEntry", default)]
+    pub failed: Vec<BatchResultErrorEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeleteMessageBatchResultEntry {
+    #[serde(rename = "Id")]
+    pub id: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ErrorResponse {
     #[serde(rename = "Error")]
     pub error: SqsError,

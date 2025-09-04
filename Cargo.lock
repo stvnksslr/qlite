@@ -1658,6 +1658,7 @@ dependencies = [
  "httpmock",
  "md5",
  "quick-xml",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

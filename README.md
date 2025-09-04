@@ -49,28 +49,38 @@ cargo build --release
 ./qlite delete my-queue <receipt-handle>
 ```
 
-## SQS API Compatibility
-
-QLite implements the SQS Query API endpoints:
-
-- `CreateQueue`
-- `ListQueues`
-- `SendMessage`
-- `ReceiveMessage`
-- `DeleteMessage`
-- `GetQueueAttributes`
-
-### Example with AWS CLI
+### Quick Start with AWS CLI
 
 ```bash
-# Configure AWS CLI to point to QLite
-aws configure set aws_access_key_id dummy
-aws configure set aws_secret_access_key dummy
-aws configure set region us-east-1
+# Set dummy credentials (any values work)
+export AWS_ACCESS_KEY_ID=dummy
+export AWS_SECRET_ACCESS_KEY=dummy
 
-# Create queue
+# Start QLite server
+cargo run -- server --port 3000
+
+# Use AWS CLI exactly like with real SQS
 aws sqs create-queue --endpoint-url http://localhost:3000 --queue-name test-queue
+aws sqs list-queues --endpoint-url http://localhost:3000
+aws sqs send-message --endpoint-url http://localhost:3000 --queue-url http://localhost:3000/test-queue --message-body "Hello World"
+aws sqs receive-message --endpoint-url http://localhost:3000 --queue-url http://localhost:3000/test-queue
+```
 
-# Send message
-aws sqs send-message --endpoint-url http://localhost:3000 --queue-url http://localhost:3000/test-queue --message-body "Hello from AWS CLI"
+### SDK Integration Example
+
+```python
+# Python boto3 example
+import boto3
+
+sqs = boto3.client(
+    'sqs',
+    endpoint_url='http://localhost:3000',
+    aws_access_key_id='dummy',
+    aws_secret_access_key='dummy',
+    region_name='us-east-1'
+)
+
+# Works exactly like AWS SQS
+queue = sqs.create_queue(QueueName='my-test-queue')
+sqs.send_message(QueueUrl=queue['QueueUrl'], MessageBody='Hello from Python!')
 ```
