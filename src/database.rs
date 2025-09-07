@@ -3,7 +3,14 @@ use tokio_rusqlite::{Connection, OptionalExtension, Result};
 use tracing::info;
 
 // Type aliases to fix clippy warnings
-pub type DelayedMessageTuple = (String, String, String, Option<String>, Option<String>, Option<String>);
+pub type DelayedMessageTuple = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 // Struct to fix too_many_arguments warning
 #[derive(Debug)]

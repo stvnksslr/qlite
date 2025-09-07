@@ -486,16 +486,17 @@ async fn handle_set_queue_attributes(
     let mut attributes = HashMap::new();
 
     for (key, value) in params.iter() {
-        if key.starts_with("Attribute.") && key.ends_with(".Name")
+        if key.starts_with("Attribute.")
+            && key.ends_with(".Name")
             && let Some(index) = key
                 .strip_prefix("Attribute.")
                 .and_then(|s| s.strip_suffix(".Name"))
-            {
-                let value_key = format!("Attribute.{}.Value", index);
-                if let Some(attr_value) = params.get(&value_key) {
-                    attributes.insert(value.clone(), attr_value.clone());
-                }
+        {
+            let value_key = format!("Attribute.{}.Value", index);
+            if let Some(attr_value) = params.get(&value_key) {
+                attributes.insert(value.clone(), attr_value.clone());
             }
+        }
     }
 
     match state

@@ -280,11 +280,12 @@ impl QueueConfig {
         }
 
         if let Some(max_count) = self.max_receive_count
-            && max_count == 0 {
-                return Err(ConfigError::Validation(
-                    "Max receive count must be > 0".to_string(),
-                ));
-            }
+            && max_count == 0
+        {
+            return Err(ConfigError::Validation(
+                "Max receive count must be > 0".to_string(),
+            ));
+        }
 
         Ok(())
     }

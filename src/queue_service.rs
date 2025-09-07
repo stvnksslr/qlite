@@ -7,7 +7,14 @@ use tokio::sync::broadcast;
 use tokio_rusqlite::Result;
 
 // Type aliases to fix clippy warnings
-type BatchSendEntry = (String, String, String, Option<HashMap<String, MessageAttributeValue>>, Option<String>, u32);
+type BatchSendEntry = (
+    String,
+    String,
+    String,
+    Option<HashMap<String, MessageAttributeValue>>,
+    Option<String>,
+    u32,
+);
 type BatchSendResult = std::result::Result<String, String>;
 
 pub struct QueueService {
@@ -406,9 +413,7 @@ impl QueueService {
             delay_until: delay_until_str.as_deref(),
             message_group_id: message.message_group_id.as_deref(),
         };
-        self.db
-            .send_message_with_delay_and_group(params)
-            .await?;
+        self.db.send_message_with_delay_and_group(params).await?;
 
         // Notify any waiting long polling requests
         self.notify_message_arrival(queue_name).await;
