@@ -66,8 +66,6 @@ impl Message {
         self.message_group_id = Some(message_group_id);
         self
     }
-
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,9 +80,7 @@ pub struct Queue {
     pub dead_letter_target_arn: Option<String>,
 }
 
-impl Queue {
-
-}
+impl Queue {}
 
 #[derive(Debug, Clone)]
 pub struct ReceivedMessage {
@@ -95,7 +91,11 @@ pub struct ReceivedMessage {
 }
 
 impl ReceivedMessage {
-    pub fn new(id: String, body: String, attributes: Option<HashMap<String, MessageAttributeValue>>) -> Self {
+    pub fn new(
+        id: String,
+        body: String,
+        attributes: Option<HashMap<String, MessageAttributeValue>>,
+    ) -> Self {
         Self {
             receipt_handle: id.clone(),
             id,

@@ -90,7 +90,7 @@ impl Default for Config {
                 cleanup_interval_seconds: 3600, // 1 hour
                 batch_size: 1000,
                 mode: RetentionMode::KeepForever, // Default: keep messages forever
-                delete_after_days: Some(14), // Only used in Delete mode
+                delete_after_days: Some(14),      // Only used in Delete mode
             },
         }
     }
@@ -98,89 +98,103 @@ impl Default for Config {
 
 impl Config {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
-        let contents = fs::read_to_string(path)
-            .map_err(|e| ConfigError::Io(e.to_string()))?;
-        
-        let config: Config = toml::from_str(&contents)
-            .map_err(|e| ConfigError::Parse(e.to_string()))?;
-        
+        let contents = fs::read_to_string(path).map_err(|e| ConfigError::Io(e.to_string()))?;
+
+        let config: Config =
+            toml::from_str(&contents).map_err(|e| ConfigError::Parse(e.to_string()))?;
+
         config.validate()?;
         Ok(config)
     }
-    
+
     pub fn load_with_overrides() -> Result<Self, ConfigError> {
         let mut config = if Path::new("qlite.toml").exists() {
             Self::load_from_file("qlite.toml")?
         } else {
             Self::default()
         };
-        
+
         // Apply environment variable overrides
         config.apply_env_overrides();
         config.validate()?;
-        
+
         Ok(config)
     }
-    
+
     fn apply_env_overrides(&mut self) {
         if let Ok(port) = std::env::var("QLITE_PORT")
-            && let Ok(port_num) = port.parse::<u16>() {
-                self.server.port = port_num;
-            }
-        
+            && let Ok(port_num) = port.parse::<u16>()
+        {
+            self.server.port = port_num;
+        }
+
         if let Ok(host) = std::env::var("QLITE_HOST") {
             self.server.host = host;
         }
-        
+
         if let Ok(db_path) = std::env::var("QLITE_DB_PATH") {
             self.database.path = db_path;
         }
-        
+
         if let Ok(enable_ui) = std::env::var("QLITE_ENABLE_UI") {
             self.server.enable_ui = enable_ui.to_lowercase() == "true";
         }
-        
+
         if let Ok(base_url) = std::env::var("QLITE_BASE_URL") {
             self.server.base_url = Some(base_url);
         }
-        
+
         if let Ok(metrics_enabled) = std::env::var("QLITE_METRICS_ENABLED") {
             self.metrics.enabled = metrics_enabled.to_lowercase() == "true";
         }
     }
-    
+
     fn validate(&self) -> Result<(), ConfigError> {
         if self.server.port == 0 {
-            return Err(ConfigError::Validation("Server port cannot be 0".to_string()));
+            return Err(ConfigError::Validation(
+                "Server port cannot be 0".to_string(),
+            ));
         }
-        
+
         if self.server.host.is_empty() {
-            return Err(ConfigError::Validation("Server host cannot be empty".to_string()));
+            return Err(ConfigError::Validation(
+                "Server host cannot be empty".to_string(),
+            ));
         }
-        
+
         if self.database.path.is_empty() {
-            return Err(ConfigError::Validation("Database path cannot be empty".to_string()));
+            return Err(ConfigError::Validation(
+                "Database path cannot be empty".to_string(),
+            ));
         }
-        
+
         if self.queues.visibility_timeout_seconds == 0 {
-            return Err(ConfigError::Validation("Visibility timeout must be > 0".to_string()));
+            return Err(ConfigError::Validation(
+                "Visibility timeout must be > 0".to_string(),
+            ));
         }
-        
+
         if self.queues.message_retention_seconds < 60 {
-            return Err(ConfigError::Validation("Message retention must be >= 60 seconds".to_string()));
+            return Err(ConfigError::Validation(
+                "Message retention must be >= 60 seconds".to_string(),
+            ));
         }
-        
-        if self.queues.message_retention_seconds > 1209600 { // 14 days
-            return Err(ConfigError::Validation("Message retention cannot exceed 14 days".to_string()));
+
+        if self.queues.message_retention_seconds > 1209600 {
+            // 14 days
+            return Err(ConfigError::Validation(
+                "Message retention cannot exceed 14 days".to_string(),
+            ));
         }
-        
+
         if self.queues.max_receive_count == 0 {
-            return Err(ConfigError::Validation("Max receive count must be > 0".to_string()));
+            return Err(ConfigError::Validation(
+                "Max receive count must be > 0".to_string(),
+            ));
         }
-        
+
         Ok(())
     }
-    
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,39 +239,53 @@ impl QueueConfig {
             ..Self::default()
         }
     }
-    
+
     #[allow(dead_code)]
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.name.is_empty() {
-            return Err(ConfigError::Validation("Queue name cannot be empty".to_string()));
+            return Err(ConfigError::Validation(
+                "Queue name cannot be empty".to_string(),
+            ));
         }
-        
+
         if self.is_fifo {
             if !self.name.ends_with(".fifo") {
-                return Err(ConfigError::Validation("FIFO queue names must end with .fifo".to_string()));
+                return Err(ConfigError::Validation(
+                    "FIFO queue names must end with .fifo".to_string(),
+                ));
             }
         } else if self.name.ends_with(".fifo") {
-            return Err(ConfigError::Validation("Standard queue names cannot end with .fifo".to_string()));
+            return Err(ConfigError::Validation(
+                "Standard queue names cannot end with .fifo".to_string(),
+            ));
         }
-        
+
         if self.visibility_timeout_seconds == 0 {
-            return Err(ConfigError::Validation("Visibility timeout must be > 0".to_string()));
+            return Err(ConfigError::Validation(
+                "Visibility timeout must be > 0".to_string(),
+            ));
         }
-        
+
         if self.message_retention_period_seconds < 60 {
-            return Err(ConfigError::Validation("Message retention must be >= 60 seconds".to_string()));
+            return Err(ConfigError::Validation(
+                "Message retention must be >= 60 seconds".to_string(),
+            ));
         }
-        
-        if self.message_retention_period_seconds > 1209600 { // 14 days
-            return Err(ConfigError::Validation("Message retention cannot exceed 14 days".to_string()));
+
+        if self.message_retention_period_seconds > 1209600 {
+            // 14 days
+            return Err(ConfigError::Validation(
+                "Message retention cannot exceed 14 days".to_string(),
+            ));
         }
-        
-        if let Some(max_count) = self.max_receive_count {
-            if max_count == 0 {
-                return Err(ConfigError::Validation("Max receive count must be > 0".to_string()));
+
+        if let Some(max_count) = self.max_receive_count
+            && max_count == 0 {
+                return Err(ConfigError::Validation(
+                    "Max receive count must be > 0".to_string(),
+                ));
             }
-        }
-        
+
         Ok(())
     }
 }
@@ -284,7 +312,7 @@ impl std::error::Error for ConfigError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_default_config() {
         let config = Config::default();
@@ -292,21 +320,21 @@ mod tests {
         assert_eq!(config.database.path, "qlite.db");
         assert!(config.validate().is_ok());
     }
-    
+
     #[test]
     fn test_fifo_queue_validation() {
         let mut config = QueueConfig::new("test.fifo".to_string(), true);
         assert!(config.validate().is_ok());
-        
+
         config.name = "test".to_string();
         assert!(config.validate().is_err());
     }
-    
+
     #[test]
     fn test_standard_queue_validation() {
         let mut config = QueueConfig::new("test".to_string(), false);
         assert!(config.validate().is_ok());
-        
+
         config.name = "test.fifo".to_string();
         assert!(config.validate().is_err());
     }

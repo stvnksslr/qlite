@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::queue_service::QueueService;
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
-use tracing::{info, error};
+use tracing::{error, info};
 
 pub struct RetentionCleanupService {
     scheduler: JobScheduler,
@@ -11,9 +11,12 @@ pub struct RetentionCleanupService {
 }
 
 impl RetentionCleanupService {
-    pub async fn new(queue_service: Arc<QueueService>, config: Config) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(
+        queue_service: Arc<QueueService>,
+        config: Config,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let scheduler = JobScheduler::new().await?;
-        
+
         Ok(Self {
             scheduler,
             queue_service,
@@ -24,7 +27,7 @@ impl RetentionCleanupService {
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let queue_service = Arc::clone(&self.queue_service);
         let cleanup_interval = self.config.retention.cleanup_interval_seconds;
-        
+
         // Create a cron job that runs every cleanup_interval_seconds
         let cron_expression = if cleanup_interval < 60 {
             // For testing, run every minute
@@ -50,15 +53,27 @@ impl RetentionCleanupService {
 
         self.scheduler.add(job).await?;
         self.scheduler.start().await?;
-        
-        info!("Retention cleanup service started with interval: {} seconds", cleanup_interval);
+
+        info!(
+            "Retention cleanup service started with interval: {} seconds",
+            cleanup_interval
+        );
         Ok(())
     }
 
-    async fn run_cleanup(queue_service: Arc<QueueService>, retention_config: crate::config::RetentionConfig) {
-        info!("Starting message retention cleanup (mode: {:?})", retention_config.mode);
-        
-        match queue_service.cleanup_expired_messages(&retention_config).await {
+    async fn run_cleanup(
+        queue_service: Arc<QueueService>,
+        retention_config: crate::config::RetentionConfig,
+    ) {
+        info!(
+            "Starting message retention cleanup (mode: {:?})",
+            retention_config.mode
+        );
+
+        match queue_service
+            .cleanup_expired_messages(&retention_config)
+            .await
+        {
             Ok(affected_count) => {
                 if affected_count > 0 {
                     let action = match retention_config.mode {
@@ -69,7 +84,7 @@ impl RetentionCleanupService {
                 } else {
                     info!("Cleanup completed: no messages required processing");
                 }
-            },
+            }
             Err(e) => {
                 error!("Failed to run retention cleanup: {}", e);
             }
@@ -105,9 +120,7 @@ impl BackgroundServices {
         self.retention_service = Some(service);
         Ok(())
     }
-
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -1,8 +1,8 @@
 use askama::Template;
 use axum::{
-    extract::{Path, State, Form},
-    response::{Html, Redirect, Json},
+    extract::{Form, Path, State},
     http::StatusCode,
+    response::{Html, Json, Redirect},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -122,10 +122,25 @@ async fn get_queue_messages(
     state: &Arc<AppState>,
     queue_name: &str,
 ) -> Result<Vec<MessageInfo>, Box<dyn std::error::Error>> {
-    let messages_data = state.queue_service.get_all_queue_messages(queue_name).await?;
-    
+    let messages_data = state
+        .queue_service
+        .get_all_queue_messages(queue_name)
+        .await?;
+
     let mut messages = Vec::new();
-    for (id, body, created_at, visibility_timeout, receive_count, attributes, deduplication_id, status, processed_at, deleted_at) in messages_data {
+    for (
+        id,
+        body,
+        created_at,
+        visibility_timeout,
+        receive_count,
+        attributes,
+        deduplication_id,
+        status,
+        processed_at,
+        deleted_at,
+    ) in messages_data
+    {
         messages.push(MessageInfo {
             id,
             body,
@@ -139,7 +154,7 @@ async fn get_queue_messages(
             deleted_at: deleted_at.unwrap_or_else(|| "Never".to_string()),
         });
     }
-    
+
     Ok(messages)
 }
 
@@ -147,6 +162,14 @@ async fn get_queue_messages(
 #[derive(Debug, Deserialize)]
 pub struct CreateQueueForm {
     pub queue_name: String,
+    pub queue_type: Option<String>,
+    pub visibility_timeout_seconds: Option<u32>,
+    pub message_retention_period_seconds: Option<u32>,
+    pub max_receive_count: Option<u32>,
+    pub delay_seconds: Option<u32>,
+    pub receive_message_wait_time_seconds: Option<u32>,
+    pub dead_letter_target_queue: Option<String>,
+    pub content_based_deduplication: Option<String>,
 }
 
 // UI handler functions for queue and message management
@@ -154,11 +177,82 @@ pub async fn create_queue_ui(
     State(state): State<Arc<AppState>>,
     Form(form): Form<CreateQueueForm>,
 ) -> Result<Redirect, String> {
+    use crate::config::QueueConfig;
+
     if form.queue_name.trim().is_empty() {
         return Err("Queue name cannot be empty".to_string());
     }
 
-    match state.queue_service.create_queue(&form.queue_name).await {
+    // Determine if it's a FIFO queue based only on explicit type selection
+    let is_fifo = form
+        .queue_type
+        .as_ref()
+        .map(|t| t == "fifo")
+        .unwrap_or(false);
+
+    // For simple queue creation (no advanced options), use the basic method
+    if form.visibility_timeout_seconds.is_none()
+        && form.message_retention_period_seconds.is_none()
+        && form.max_receive_count.is_none()
+        && form.delay_seconds.is_none()
+        && form.receive_message_wait_time_seconds.is_none()
+        && form
+            .dead_letter_target_queue
+            .as_ref()
+            .is_none_or(|s| s.trim().is_empty())
+        && !is_fifo
+    {
+        match state.queue_service.create_queue(&form.queue_name).await {
+            Ok(_) => return Ok(Redirect::to("/ui")),
+            Err(e) => return Err(format!("Failed to create queue: {}", e)),
+        }
+    }
+
+    // For advanced options or FIFO queues, use the config method
+    let mut config = QueueConfig {
+        name: form.queue_name.clone(),
+        is_fifo,
+        ..Default::default()
+    };
+
+    // Apply custom configuration values
+    if let Some(timeout) = form.visibility_timeout_seconds {
+        config.visibility_timeout_seconds = timeout;
+    }
+
+    if let Some(retention) = form.message_retention_period_seconds {
+        config.message_retention_period_seconds = retention;
+    }
+
+    if let Some(max_receive) = form.max_receive_count {
+        config.max_receive_count = Some(max_receive);
+    }
+
+    if let Some(delay) = form.delay_seconds {
+        config.delay_seconds = delay;
+    }
+
+    if let Some(wait_time) = form.receive_message_wait_time_seconds {
+        config.receive_message_wait_time_seconds = wait_time;
+    }
+
+    if let Some(dlq_queue) = form
+        .dead_letter_target_queue
+        .filter(|s| !s.trim().is_empty())
+    {
+        // Convert queue name to a simple ARN-like format for internal use
+        config.dead_letter_target_arn = Some(format!("qlite://queue/{}", dlq_queue));
+    }
+
+    // FIFO-specific options
+    if is_fifo {
+        config.content_based_deduplication = form
+            .content_based_deduplication
+            .map(|v| v == "on")
+            .unwrap_or(true); // Default to true for FIFO queues
+    }
+
+    match state.queue_service.create_queue_with_config(&config).await {
         Ok(_) => Ok(Redirect::to("/ui")),
         Err(e) => Err(format!("Failed to create queue: {}", e)),
     }
@@ -251,4 +345,3 @@ pub async fn restore_message_json(
         )),
     }
 }
-

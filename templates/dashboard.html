@@ -6,6 +6,12 @@
     <title>QLite Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <!-- Prism.js for syntax highlighting -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
     <style>
         .queue-card {
             transition: all 0.2s ease-in-out;
@@ -30,6 +36,75 @@
         }
         .message-toggle::after {
             content: " ▼";
+        }
+        .aws-cli-command {
+            scrollbar-width: thin;
+            scrollbar-color: #4b5563 #1f2937;
+        }
+        .aws-cli-command::-webkit-scrollbar {
+            height: 6px;
+        }
+        .aws-cli-command::-webkit-scrollbar-track {
+            background: #1f2937;
+            border-radius: 3px;
+        }
+        .aws-cli-command::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 3px;
+        }
+        .aws-cli-command::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
+        }
+        .copy-btn {
+            transition: all 0.2s ease-in-out;
+        }
+        /* Custom Prism theme overrides for better integration */
+        .code-container {
+            position: relative;
+            border-radius: 0.375rem;
+            overflow: hidden;
+        }
+        .code-container pre[class*="language-"] {
+            margin: 0;
+            padding: 0.75rem;
+            font-size: 0.75rem;
+            line-height: 1.5;
+            background: #1a1a1a;
+            overflow-x: auto;
+        }
+        .code-container code[class*="language-"] {
+            font-family: 'Monaco', 'Courier New', monospace;
+            text-shadow: none;
+        }
+        /* Custom colors for each language */
+        .language-bash .token.function {
+            color: #4ade80;
+        }
+        .language-python .token.keyword {
+            color: #fbbf24;
+        }
+        .language-python .token.string {
+            color: #86efac;
+        }
+        .language-javascript .token.keyword {
+            color: #c084fc;
+        }
+        .language-javascript .token.string {
+            color: #86efac;
+        }
+        pre[class*="language-"]::-webkit-scrollbar {
+            height: 6px;
+        }
+        pre[class*="language-"]::-webkit-scrollbar-track {
+            background: #1f2937;
+            border-radius: 3px;
+        }
+        pre[class*="language-"]::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 3px;
+        }
+        pre[class*="language-"]::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
         }
     </style>
 </head>
@@ -155,20 +230,128 @@
                             </div>
                         </div>
                         
-                        <div class="mt-4 pt-4 border-t border-gray-100 space-y-2">
-                            <button 
-                                class="queue-btn w-full px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium"
-                                data-queue="{{ queue.name }}"
-                                hx-get="/ui/queue/{{ queue.name }}"
-                                hx-target="#queue-messages"
-                                hx-swap="innerHTML">
-                                View Messages
-                            </button>
-                            <button 
-                                class="delete-queue-btn w-full px-4 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors text-sm font-medium"
-                                data-queue-name="{{ queue.name }}">
-                                🗑️ Delete Queue
-                            </button>
+                        <div class="mt-4 pt-4 border-t border-gray-100">
+                            <!-- Connection Details Accordion -->
+                            <div class="mb-3">
+                                <button class="connection-toggle w-full text-left p-2 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors" data-queue-id="{{ queue.name }}">
+                                    <span class="text-xs font-semibold text-gray-700">📡 Connection Details</span>
+                                    <span class="float-right text-gray-500">▼</span>
+                                </button>
+                                
+                                <div class="connection-details hidden mt-2 space-y-2" data-queue-details="{{ queue.name }}">
+                                    <!-- Queue URL -->
+                                    <div class="p-2 bg-gray-50 rounded">
+                                        <p class="text-xs font-semibold text-gray-600 mb-1">Queue URL:</p>
+                                        <div class="code-container relative">
+                                            <pre><code class="language-bash">http://localhost:3000/{{ queue.name }}</code></pre>
+                                            <button class="copy-btn absolute top-1 right-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded"
+                                                    data-copy-text="http://localhost:3000/{{ queue.name }}">📋</button>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- AWS CLI Command -->
+                                    <div class="p-2 bg-gray-50 rounded">
+                                        <p class="text-xs font-semibold text-gray-600 mb-1">AWS CLI:</p>
+                                        <div class="code-container relative">
+                                            <pre><code class="language-bash">aws sqs send-message --endpoint-url http://localhost:3000 --queue-url http://localhost:3000/{{ queue.name }} --message-body "Your message"</code></pre>
+                                            <button class="copy-btn absolute top-1 right-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded"
+                                                    data-copy-text='aws sqs send-message --endpoint-url http://localhost:3000 --queue-url http://localhost:3000/{{ queue.name }} --message-body "Your message"'>📋</button>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Python SDK -->
+                                    <div class="p-2 bg-gray-50 rounded">
+                                        <p class="text-xs font-semibold text-gray-600 mb-1">Python (boto3):</p>
+                                        <div class="code-container relative">
+                                            <pre><code class="language-python">import boto3
+
+sqs = boto3.client('sqs',
+    endpoint_url='http://localhost:3000',
+    aws_access_key_id='dummy',
+    aws_secret_access_key='dummy',
+    region_name='us-east-1'
+)
+
+sqs.send_message(
+    QueueUrl='http://localhost:3000/{{ queue.name }}',
+    MessageBody='Your message'
+)</code></pre>
+                                            <button class="copy-btn absolute top-1 right-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded"
+                                                    data-copy-text="import boto3
+
+sqs = boto3.client('sqs',
+    endpoint_url='http://localhost:3000',
+    aws_access_key_id='dummy',
+    aws_secret_access_key='dummy',
+    region_name='us-east-1'
+)
+
+sqs.send_message(
+    QueueUrl='http://localhost:3000/{{ queue.name }}',
+    MessageBody='Your message'
+)">📋</button>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- JavaScript SDK -->
+                                    <div class="p-2 bg-gray-50 rounded">
+                                        <p class="text-xs font-semibold text-gray-600 mb-1">JavaScript (AWS SDK v3):</p>
+                                        <div class="code-container relative">
+                                            <pre><code class="language-javascript">import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
+
+const client = new SQSClient({
+    endpoint: "http://localhost:3000",
+    region: "us-east-1",
+    credentials: {
+        accessKeyId: "dummy",
+        secretAccessKey: "dummy"
+    }
+});
+
+const command = new SendMessageCommand({
+    QueueUrl: "http://localhost:3000/{{ queue.name }}",
+    MessageBody: "Your message"
+});
+
+await client.send(command);</code></pre>
+                                            <button class="copy-btn absolute top-1 right-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded"
+                                                    data-copy-text='import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
+
+const client = new SQSClient({
+    endpoint: "http://localhost:3000",
+    region: "us-east-1",
+    credentials: {
+        accessKeyId: "dummy",
+        secretAccessKey: "dummy"
+    }
+});
+
+const command = new SendMessageCommand({
+    QueueUrl: "http://localhost:3000/{{ queue.name }}",
+    MessageBody: "Your message"
+});
+
+await client.send(command);'>📋</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="space-y-2">
+                                <button 
+                                    class="queue-btn w-full px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium"
+                                    data-queue="{{ queue.name }}"
+                                    hx-get="/ui/queue/{{ queue.name }}"
+                                    hx-target="#queue-messages"
+                                    hx-swap="innerHTML">
+                                    View Messages
+                                </button>
+                                <button 
+                                    class="delete-queue-btn w-full px-4 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors text-sm font-medium"
+                                    data-queue-name="{{ queue.name }}">
+                                    🗑️ Delete Queue
+                                </button>
+                            </div>
                         </div>
                     </div>
                     {% endfor %}
@@ -201,33 +384,164 @@
 
     <!-- Create Queue Modal -->
     <div id="create-queue-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div class="mt-3 text-center">
-                <h3 class="text-lg font-medium text-gray-900">Create New Queue</h3>
-                <div class="mt-4">
-                    <form action="/ui/create-queue" method="post" id="create-queue-form">
-                        <input 
-                            type="text" 
-                            name="queue_name" 
-                            placeholder="Enter queue name"
-                            required
-                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                        <div class="flex justify-between mt-6">
-                            <button 
-                                type="button" 
-                                id="cancel-create-queue"
-                                class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors">
-                                Cancel
-                            </button>
-                            <button 
-                                type="submit"
-                                class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors">
-                                Create Queue
+        <div class="relative top-10 mx-auto p-6 border w-full max-w-2xl shadow-lg rounded-md bg-white">
+            <div class="mt-3">
+                <h3 class="text-lg font-medium text-gray-900 mb-4">Create New Queue</h3>
+                <form action="/ui/create-queue" method="post" id="create-queue-form">
+                    <div class="space-y-4">
+                        <!-- Queue Name -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Queue Name *</label>
+                            <input 
+                                type="text" 
+                                name="queue_name" 
+                                placeholder="e.g., my-queue or my-fifo-queue.fifo"
+                                required
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                            <p class="text-xs text-gray-500 mt-1">Choose queue type below. FIFO queue names should end with ".fifo"</p>
+                        </div>
+
+                        <!-- Queue Type -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Queue Type</label>
+                            <div class="flex items-center space-x-4">
+                                <label class="flex items-center">
+                                    <input type="radio" name="queue_type" value="standard" checked class="mr-2">
+                                    <span class="text-sm">Standard Queue</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="queue_type" value="fifo" class="mr-2">
+                                    <span class="text-sm">FIFO Queue</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Advanced Options Toggle -->
+                        <div>
+                            <button type="button" id="advanced-options-toggle" class="text-sm text-blue-600 hover:text-blue-800 flex items-center">
+                                <span>⚙️ Advanced Options</span>
+                                <span class="ml-2">▼</span>
                             </button>
                         </div>
-                    </form>
-                </div>
+
+                        <!-- Advanced Options -->
+                        <div id="advanced-options" class="hidden space-y-4 border-t pt-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <!-- Visibility Timeout -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Visibility Timeout (seconds)</label>
+                                    <input 
+                                        type="number" 
+                                        name="visibility_timeout_seconds" 
+                                        value="30"
+                                        min="0"
+                                        max="43200"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                    <p class="text-xs text-gray-500 mt-1">0-43200 seconds</p>
+                                </div>
+
+                                <!-- Message Retention Period -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Message Retention (seconds)</label>
+                                    <input 
+                                        type="number" 
+                                        name="message_retention_period_seconds" 
+                                        value="1209600"
+                                        min="60"
+                                        max="1209600"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                    <p class="text-xs text-gray-500 mt-1">60-1209600 seconds (14 days max)</p>
+                                </div>
+
+                                <!-- Max Receive Count -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Max Receive Count</label>
+                                    <input 
+                                        type="number" 
+                                        name="max_receive_count" 
+                                        value="10"
+                                        min="1"
+                                        max="1000"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                    <p class="text-xs text-gray-500 mt-1">Messages moved to DLQ after this many receives</p>
+                                </div>
+
+                                <!-- Delay Seconds -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Delay Seconds</label>
+                                    <input 
+                                        type="number" 
+                                        name="delay_seconds" 
+                                        value="0"
+                                        min="0"
+                                        max="900"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                    <p class="text-xs text-gray-500 mt-1">0-900 seconds delay before messages become available</p>
+                                </div>
+
+                                <!-- Receive Message Wait Time -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Long Polling Wait Time (seconds)</label>
+                                    <input 
+                                        type="number" 
+                                        name="receive_message_wait_time_seconds" 
+                                        value="0"
+                                        min="0"
+                                        max="20"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                    <p class="text-xs text-gray-500 mt-1">0-20 seconds (0 = short polling)</p>
+                                </div>
+
+                                <!-- Dead Letter Target -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Dead Letter Queue</label>
+                                    <select 
+                                        name="dead_letter_target_queue" 
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        <option value="">None (no dead letter queue)</option>
+                                        {% for queue in queues %}
+                                            <option value="{{ queue.name }}">{{ queue.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <p class="text-xs text-gray-500 mt-1">Optional: Select existing queue as dead letter queue</p>
+                                </div>
+                            </div>
+
+                            <!-- FIFO-specific options -->
+                            <div id="fifo-options" class="hidden border-t pt-4">
+                                <h4 class="text-sm font-medium text-gray-700 mb-3">FIFO Queue Options</h4>
+                                <div>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" name="content_based_deduplication" checked class="mr-2">
+                                        <span class="text-sm">Content-Based Deduplication</span>
+                                    </label>
+                                    <p class="text-xs text-gray-500 mt-1">Enable automatic deduplication based on message content</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between mt-6">
+                        <button 
+                            type="button" 
+                            id="cancel-create-queue"
+                            class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors">
+                            Cancel
+                        </button>
+                        <button 
+                            type="submit"
+                            class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors">
+                            Create Queue
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
@@ -237,6 +551,7 @@
         let uiState = {
             selectedQueue: null,
             expandedMessages: new Set(),
+            expandedConnectionDetails: new Set(),
             scrollPosition: 0,
             lastRefreshTime: Date.now()
         };
@@ -253,6 +568,15 @@
             uiState.expandedMessages.clear();
             document.querySelectorAll('.message-expanded').forEach(el => {
                 uiState.expandedMessages.add(el.getAttribute('data-message-id'));
+            });
+
+            // Remember expanded connection details
+            uiState.expandedConnectionDetails.clear();
+            document.querySelectorAll('.connection-details:not(.hidden)').forEach(el => {
+                const queueId = el.getAttribute('data-queue-details');
+                if (queueId) {
+                    uiState.expandedConnectionDetails.add(queueId);
+                }
             });
 
             // Remember scroll position
@@ -331,6 +655,26 @@
                                 selectedBtn.setAttribute('data-queue-name', wasSelected);
                             }
                         }
+                        
+                        // Restore expanded connection details
+                        uiState.expandedConnectionDetails.forEach(queueId => {
+                            const details = document.querySelector(`[data-queue-details="${queueId}"]`);
+                            if (details) {
+                                details.classList.remove('hidden');
+                                const toggle = document.querySelector(`[data-queue-id="${queueId}"]`);
+                                if (toggle) {
+                                    const arrow = toggle.querySelector('.float-right');
+                                    if (arrow) {
+                                        arrow.textContent = '▲';
+                                    }
+                                }
+                                // Re-highlight code in expanded sections
+                                Prism.highlightAllUnder(details);
+                            }
+                        });
+                        
+                        // Highlight all new code blocks
+                        Prism.highlightAllUnder(currentQueues);
                     }
                     
                     // If a queue is selected, refresh its messages
@@ -520,6 +864,105 @@
             if (e.target === modal) {
                 modal.classList.add('hidden');
                 document.getElementById('create-queue-form').reset();
+            }
+        });
+
+        // Copy to clipboard functionality
+        document.addEventListener('click', function(e) {
+            if (e.target.matches('.copy-btn')) {
+                const textToCopy = e.target.getAttribute('data-copy-text');
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    // Store original text
+                    const originalText = e.target.textContent;
+                    // Change button text to indicate success
+                    e.target.textContent = '✓';
+                    e.target.classList.add('bg-green-600');
+                    e.target.classList.remove('bg-gray-700');
+                    
+                    // Reset after 2 seconds
+                    setTimeout(() => {
+                        e.target.textContent = originalText;
+                        e.target.classList.remove('bg-green-600');
+                        e.target.classList.add('bg-gray-700');
+                    }, 2000);
+                }).catch(err => {
+                    console.error('Failed to copy text: ', err);
+                    // Fallback for older browsers
+                    const textArea = document.createElement('textarea');
+                    textArea.value = textToCopy;
+                    textArea.style.position = 'fixed';
+                    textArea.style.left = '-9999px';
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    try {
+                        document.execCommand('copy');
+                        e.target.textContent = '✓';
+                        setTimeout(() => {
+                            e.target.textContent = '📋';
+                        }, 2000);
+                    } catch (err) {
+                        console.error('Fallback copy failed: ', err);
+                    }
+                    document.body.removeChild(textArea);
+                });
+            }
+        });
+
+        // Toggle connection details accordion
+        document.addEventListener('click', function(e) {
+            if (e.target.matches('.connection-toggle') || e.target.closest('.connection-toggle')) {
+                const button = e.target.matches('.connection-toggle') ? e.target : e.target.closest('.connection-toggle');
+                const queueId = button.getAttribute('data-queue-id');
+                const details = document.querySelector(`[data-queue-details="${queueId}"]`);
+                const arrow = button.querySelector('.float-right');
+                
+                if (details.classList.contains('hidden')) {
+                    details.classList.remove('hidden');
+                    arrow.textContent = '▲';
+                    uiState.expandedConnectionDetails.add(queueId);
+                    // Highlight code blocks when expanding
+                    Prism.highlightAllUnder(details);
+                } else {
+                    details.classList.add('hidden');
+                    arrow.textContent = '▼';
+                    uiState.expandedConnectionDetails.delete(queueId);
+                }
+            }
+        });
+
+        // Initialize syntax highlighting on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            Prism.highlightAll();
+        });
+
+        // Queue creation form handlers
+        document.addEventListener('click', function(e) {
+            // Advanced options toggle
+            if (e.target.matches('#advanced-options-toggle') || e.target.closest('#advanced-options-toggle')) {
+                const button = e.target.matches('#advanced-options-toggle') ? e.target : e.target.closest('#advanced-options-toggle');
+                const options = document.getElementById('advanced-options');
+                const arrow = button.querySelector('span:last-child');
+                
+                if (options.classList.contains('hidden')) {
+                    options.classList.remove('hidden');
+                    arrow.textContent = '▲';
+                } else {
+                    options.classList.add('hidden');
+                    arrow.textContent = '▼';
+                }
+            }
+        });
+
+        // Queue type radio button handlers
+        document.addEventListener('change', function(e) {
+            if (e.target.name === 'queue_type') {
+                const fifoOptions = document.getElementById('fifo-options');
+                
+                if (e.target.value === 'fifo') {
+                    fifoOptions.classList.remove('hidden');
+                } else {
+                    fifoOptions.classList.add('hidden');
+                }
             }
         });
     </script>
