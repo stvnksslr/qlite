@@ -1,6 +1,6 @@
 [package]
 name = "qlite"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A sqs drop in replacement for local or cicd development"
 license = "MIT"
