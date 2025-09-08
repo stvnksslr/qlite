@@ -89,60 +89,59 @@ sqs.send_message(QueueUrl=queue['QueueUrl'], MessageBody='Hello from Python!')
 
 This matrix shows which AWS SQS features are supported by QLite, available in AWS SQS, and covered by our test suite.
 
-| Feature | QLite Support | AWS SQS | Tested |
-|---------|:-------------:|:-------:|:------:|
-| **Core Queue Operations** |
-| CreateQueue | ✅ | ✅ | ✅ |
-| ListQueues | ✅ | ✅ | ✅ |
-| GetQueueUrl | ✅ | ✅ | ✅ |
-| DeleteQueue | ✅ | ✅ | ✅ |
-| GetQueueAttributes | ✅ | ✅ | ✅ |
-| SetQueueAttributes | ✅ | ✅ | ✅ |
-| **Message Operations** |
-| SendMessage | ✅ | ✅ | ✅ |
-| ReceiveMessage | ✅ | ✅ | ✅ |
-| DeleteMessage | ✅ | ✅ | ✅ |
-| SendMessageBatch | ✅ | ✅ | ✅ |
-| DeleteMessageBatch | ✅ | ✅ | ✅ |
-| **Message Attributes** |
-| MessageAttributes | ✅ | ✅ | ✅ |
-| MessageSystemAttributes | ✅ | ✅ | ✅ |
-| **Queue Types** |
-| Standard Queues | ✅ | ✅ | ✅ |
-| FIFO Queues (.fifo) | ✅ | ✅ | ✅ |
-| **Queue Attributes** |
-| VisibilityTimeout | ✅ | ✅ | ✅ |
-| MessageRetentionPeriod | ✅ | ✅ | ✅ |
-| DelaySeconds | ✅ | ✅ | ✅ |
-| MaxReceiveCount | ✅ | ✅ | ✅ |
-| RedrivePolicy (DLQ) | ✅ | ✅ | ✅ |
-| **FIFO-Specific Features** |
-| MessageGroupId | ✅ | ✅ | ✅ |
-| MessageDeduplicationId | ✅ | ✅ | ✅ |
-| ContentBasedDeduplication | ✅ | ✅ | ✅ |
-| FifoThroughputLimit | ❌ | ✅ | ❌ |
-| DeduplicationScope | ❌ | ✅ | ❌ |
-| **Advanced Features** |
-| Long Polling (WaitTimeSeconds) | ✅ | ✅ | ✅ |
-| Short Polling | ✅ | ✅ | ✅ |
-| Message Timers (DelaySeconds) | ✅ | ✅ | ✅ |
-| Dead Letter Queues | ✅ | ✅ | ✅ |
-| **Security & Access** |
-| IAM Integration | ❌ | ✅ | ❌ |
-| SQS Access Policy | ❌ | ✅ | ❌ |
-| Server-Side Encryption | ❌ | ✅ | ❌ |
-| **Monitoring & Management** |
-| CloudWatch Metrics | ❌ | ✅ | ❌ |
-| Message Tracing | ❌ | ✅ | ❌ |
-| Tags | ❌ | ✅ | ❌ |
-| **Format Support** |
-| XML Responses | ✅ | ✅ | ✅ |
-| JSON Responses (SDK) | ✅ | ✅ | ✅ |
-| Form-encoded Requests | ✅ | ✅ | ✅ |
+| Feature                        | QLite Support | AWS SQS | Tested |
+| ------------------------------ | :-----------: | :-----: | :----: |
+| **Core Queue Operations**      |
+| CreateQueue                    |       ✅       |    ✅    |   ✅    |
+| ListQueues                     |       ✅       |    ✅    |   ✅    |
+| GetQueueUrl                    |       ✅       |    ✅    |   ✅    |
+| DeleteQueue                    |       ✅       |    ✅    |   ✅    |
+| GetQueueAttributes             |       ✅       |    ✅    |   ✅    |
+| SetQueueAttributes             |       ✅       |    ✅    |   ✅    |
+| **Message Operations**         |
+| SendMessage                    |       ✅       |    ✅    |   ✅    |
+| ReceiveMessage                 |       ✅       |    ✅    |   ✅    |
+| DeleteMessage                  |       ✅       |    ✅    |   ✅    |
+| SendMessageBatch               |       ✅       |    ✅    |   ✅    |
+| DeleteMessageBatch             |       ✅       |    ✅    |   ✅    |
+| **Message Attributes**         |
+| MessageAttributes              |       ✅       |    ✅    |   ✅    |
+| MessageSystemAttributes        |       ✅       |    ✅    |   ✅    |
+| **Queue Types**                |
+| Standard Queues                |       ✅       |    ✅    |   ✅    |
+| FIFO Queues (.fifo)            |       ✅       |    ✅    |   ✅    |
+| **Queue Attributes**           |
+| VisibilityTimeout              |       ✅       |    ✅    |   ✅    |
+| MessageRetentionPeriod         |       ✅       |    ✅    |   ✅    |
+| DelaySeconds                   |       ✅       |    ✅    |   ✅    |
+| MaxReceiveCount                |       ✅       |    ✅    |   ✅    |
+| RedrivePolicy (DLQ)            |       ✅       |    ✅    |   ✅    |
+| **FIFO-Specific Features**     |
+| MessageGroupId                 |       ✅       |    ✅    |   ✅    |
+| MessageDeduplicationId         |       ✅       |    ✅    |   ✅    |
+| ContentBasedDeduplication      |       ❌       |    ✅    |   ✅    |
+| FifoThroughputLimit            |       ❌       |    ✅    |        |
+| DeduplicationScope             |       ❌       |    ✅    |        |
+| **Advanced Features**          |
+| Long Polling (WaitTimeSeconds) |       ✅       |    ✅    |   ✅    |
+| Short Polling                  |       ✅       |    ✅    |   ✅    |
+| Message Timers (DelaySeconds)  |       ✅       |    ✅    |   ✅    |
+| Dead Letter Queues             |       ✅       |    ✅    |   ✅    |
+| **Security & Access**          |
+| IAM Integration                |       ❌       |    ✅    |        |
+| SQS Access Policy              |       ❌       |    ✅    |        |
+| Server-Side Encryption         |       ❌       |    ✅    |        |
+| **Monitoring & Management**    |
+| CloudWatch Metrics             |       ❌       |    ✅    |        |
+| Message Tracing                |       ❌       |    ✅    |        |
+| Tags                           |       ❌       |    ✅    |        |
+| **Format Support**             |
+| XML Responses                  |       ✅       |    ✅    |   ✅    |
+| JSON Responses (SDK)           |       ✅       |    ✅    |   ✅    |
+| Form-encoded Requests          |       ✅       |    ✅    |   ✅    |
 
 ### Legend
 - ✅ **Fully Supported/Available** - Feature works as expected
-- ⚠️ **Partial/Issues** - Feature implemented but has limitations or test gaps
 - ❌ **Not Supported** - Feature not implemented or not applicable
 
 ### Test Coverage
